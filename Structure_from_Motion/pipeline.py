@@ -241,7 +241,8 @@ class Pipeline:
     def _extract_keypoints_surf(self):
         """Extracts keypoints via SURF descriptors"""
         # extract keypoints and descriptors from both images
-        detector = cv2.SURF(250)
+        detector = cv2.xfeatures2d.SURF_create(250)
+
         first_key_points, first_desc = detector.detectAndCompute(self.img1,
                                                                  None)
         second_key_points, second_desc = detector.detectAndCompute(self.img2,
