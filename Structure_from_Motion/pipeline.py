@@ -287,6 +287,7 @@ class Pipeline:
 
     def _find_fundamental_matrix(self):
         """Estimates fundamental matrix """
+        # Uses RANSAC to produce an improved estimate of the fundamental matrix
         self.F, self.Fmask = cv2.findFundamentalMat(self.match_pts1,
                                                     self.match_pts2,
                                                     cv2.FM_RANSAC, 0.1, 0.99)
@@ -317,7 +318,7 @@ class Pipeline:
         # Determine the correct choice of second camera matrix
         # only in one of the four configurations will all the points be in
         # front of both cameras
-        # First choice: R = U * Wt * Vt, T = +u_3 (See Hartley Zisserman 9.19)
+        # First choice: R = U * W * Vt, T = +u_3 (See Hartley Zisserman 9.19)
         R = U.dot(W).dot(Vt)
         T = U[:, 2]
         if not self._in_front_of_both_cameras(first_inliers, second_inliers,
@@ -340,6 +341,9 @@ class Pipeline:
         self.match_inliers2 = second_inliers
         self.Rt1 = np.hstack((np.eye(3), np.zeros((3, 1))))
         self.Rt2 = np.hstack((R, T.reshape(3, 1)))
+        # Print Rt
+        print("[R|t] matrix:")
+        print(self.Rt2)
 
     def _draw_epipolar_lines_helper(self, img1, img2, lines, pts1, pts2):
         """Helper method to draw epipolar lines and features """

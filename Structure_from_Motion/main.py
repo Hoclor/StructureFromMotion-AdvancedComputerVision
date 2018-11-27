@@ -33,8 +33,17 @@ def main():
             print('Error: Original data sequence identified, but neither right nor left camera chosen: {}'.format(master_path_to_dataset))
             K = np.zeros((3, 3))
             d = np.zeroes((1, 5))
+    else:
+        # Unexpected dataset: make the user confirm the images are in chronological order, and that they've inserted the values for K and d here
+        #HERE
+        K = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8]).reshape(3, 3)
+        d = np.array([0,1,2,3,4]).reshape(1, 5)
+        cont = input("A different dataset than the one given with the assignment was detected.\nPlease ensure that the images in the directory are in chronological order, alphabetically (i.e. first image alphabetically is also first image chronologically)\nAlso ensure that you have inserted the correct camera intrinsics values into K and d in the code, after the comment '#HERE'.\nContinue? (y/n)")
+    if('y' != cont.lower() and 'yes' != cont.lower()):
+        quit()
 
-    # Create an instance of the pipeline class
+
+    # Create an instance of the Pipeline class
     pipeline_instance = Pipeline(K, d)
     # Execute the SfM pipeline on this image sequence
 
