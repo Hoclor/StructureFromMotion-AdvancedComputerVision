@@ -85,7 +85,7 @@ class Pipeline:
         self._extract_keypoints("flow")
 
         img = self.img1
-        for i in xrange(len(self.match_pts1)):
+        for i in range(len(self.match_pts1)):
             cv2.line(img, tuple(self.match_pts1[i]), tuple(self.match_pts2[i]),
                      color=(255, 0, 0))
             theta = np.arctan2(self.match_pts2[i][1] - self.match_pts1[i][1],
