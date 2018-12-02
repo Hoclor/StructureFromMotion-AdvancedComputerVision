@@ -54,6 +54,10 @@ class Pipeline:
         self.img1 = cv2.imread(img_path1, cv2.CV_8UC3)
         self.img2 = cv2.imread(img_path2, cv2.CV_8UC3)
 
+        # show the two images side-by-side
+        cv2.imshow("img1, img2", np.hstack((self.img1, self.img2)))
+        cv2.waitKey()
+
         # make sure images are valid
         if self.img1 is None:
             sys.exit("Image " + img_path1 + " could not be loaded.")
@@ -66,13 +70,13 @@ class Pipeline:
 
         # scale down image if necessary
         # to something close to 600px wide
-        target_width = 600
-        if use_pyr_down and self.img1.shape[1] > target_width:
-            while self.img1.shape[1] > 2*target_width:
-                self.img1 = cv2.pyrDown(self.img1)
-                self.img2 = cv2.pyrDown(self.img2)
+        # target_width = 600
+        # if use_pyr_down and self.img1.shape[1] > target_width:
+        #     while self.img1.shape[1] > 2*target_width:
+        #         self.img1 = cv2.pyrDown(self.img1)
+        #         self.img2 = cv2.pyrDown(self.img2)
 
-        # undistort the images
+        # don't undistort the images as they are already calibrated
         self.img1 = cv2.undistort(self.img1, self.K, self.d)
         self.img2 = cv2.undistort(self.img2, self.K, self.d)
 
@@ -241,7 +245,7 @@ class Pipeline:
     def _extract_keypoints_surf(self):
         """Extracts keypoints via SURF descriptors"""
         # extract keypoints and descriptors from both images
-        detector = cv2.xfeatures2d.SURF_create(250)
+        detector = cv2.xfeatures2d.SURF_create(350)
 
         first_key_points, first_desc = detector.detectAndCompute(self.img1,
                                                                  None)
@@ -249,8 +253,22 @@ class Pipeline:
                                                                    None)
 
         # match descriptors
-        matcher = cv2.BFMatcher(cv2.NORM_L1, True)
-        matches = matcher.match(first_desc, second_desc)
+        matcher = cv2.BFMatcher(normType=cv2.NORM_L2, crossCheck=False) # False if using knnMatch, True otherwise
+        # Extract the top 2 matches for each point so we can perform ratio test
+        matches = matcher.knnMatch(first_desc, second_desc, k=2)
+        # matches = matcher.match(first_desc, second_desc)
+
+        # Keep only matches with a ratio of at most 0.75 (i.e. #1 match < 0.75*#2 match)
+        matches = [first for first, second in matches if first.distance < 0.75*second.distance]
+        # Keep only the matches with distance below 0.5 (to remove bad/faulty matches that could negatively impact results)
+        matches = [x for x in matches if x.distance < 0.1] # < 0.3
+
+        print('Number of feature point matches:', len(matches))
+        
+        # Draw and show the matches
+        # img3 = np.zeros((960, 2560, 3))
+        # img3 = cv2.drawMatches(self.img1, first_key_points, self.img2, second_key_points, matches, img3, flags=2)
+        # plt.imshow(img3), plt.show()
 
         # generate lists of point correspondences
         first_match_points = np.zeros((len(matches), 2), dtype=np.float32)
@@ -290,11 +308,13 @@ class Pipeline:
         # Uses RANSAC to produce an improved estimate of the fundamental matrix
         self.F, self.Fmask = cv2.findFundamentalMat(self.match_pts1,
                                                     self.match_pts2,
-                                                    cv2.FM_RANSAC, 0.1, 0.99)
+                                                    cv2.FM_RANSAC, 0.1, 0.999)
 
     def _find_essential_matrix(self):
         """Estimates essential matrix based on fundamental matrix """
         self.E = self.K.T.dot(self.F).dot(self.K)
+        print("Essential matrix:")
+        print(self.E)
 
     def _find_camera_matrices_rt(self):
         """Finds the [R|t] camera matrix"""
@@ -319,30 +339,43 @@ class Pipeline:
         # only in one of the four configurations will all the points be in
         # front of both cameras
         # First choice: R = U * W * Vt, T = +u_3 (See Hartley Zisserman 9.19)
-        R = U.dot(W).dot(Vt)
-        T = U[:, 2]
+        R = U.dot(W.T).dot(Vt)
+        # Create sigma - lowest singular value of E will be in last index of S
+        sigma = np.array([S[-1], 0, 0, 0, S[-1], 0, 0, 0, 0]).reshape(3, 3)
+        T_x = U.dot(W).dot(sigma).dot(U.T)
+        # Alternatively
+        # Z = np.array([0, 1, 0, -1, 0, 0, 0, 0, 0]).reshape(3, 3)
+        # T_x = U.dot(Z).dot(U.T)
+        # Extract T from T_x ~=
+        # [0, -T3, T2]
+        # [T3, 0, -T1]
+        # [-T2, T1, 0]
+        # Average these pairs of T values, in case they are not exact
+        T = np.array([sum([-T_x[1][2], T_x[2][1]])/2, sum([T_x[0][2], -T_x[2][0]])/2, sum([-T_x[0][2], T_x[1][0]])/2]).reshape(3, 1)
         if not self._in_front_of_both_cameras(first_inliers, second_inliers,
                                               R, T):
             # Second choice: R = U * W * Vt, T = -u_3
-            T = - U[:, 2]
+            R = U.dot(W).dot(Vt)
 
         if not self._in_front_of_both_cameras(first_inliers, second_inliers,
                                               R, T):
             # Third choice: R = U * Wt * Vt, T = u_3
             R = U.dot(W.T).dot(Vt)
-            T = U[:, 2]
+            T = np.negative(T)
 
             if not self._in_front_of_both_cameras(first_inliers,
                                                   second_inliers, R, T):
                 # Fourth choice: R = U * Wt * Vt, T = -u_3
-                T = - U[:, 2]
+                R = U.dot(W).dot(Vt)
 
         self.match_inliers1 = first_inliers
         self.match_inliers2 = second_inliers
         self.Rt1 = np.hstack((np.eye(3), np.zeros((3, 1))))
         self.Rt2 = np.hstack((R, T.reshape(3, 1)))
         # Print Rt
-        print("[R|t] matrix:")
+        print("Cam1 [R|t] matrix:")
+        print(self.Rt1)
+        print("Cam2 [R|t] matrix:")
         print(self.Rt2)
 
     def _draw_epipolar_lines_helper(self, img1, img2, lines, pts1, pts2):
