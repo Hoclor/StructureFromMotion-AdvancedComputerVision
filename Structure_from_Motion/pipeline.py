@@ -40,8 +40,11 @@ def pipeline(path_to_dataset, verbose=False):
         pts2, desc2 = get_feature_points(img2, verbose)
 
         # Find the feature point matches between img1 and img2
-        matches = match_feature_points(img1, pts1, desc1, img2, pts2, desc2, verbose)
-        # Stop after the first image, for testing
+        matches, img1_matches, img2_matches = match_feature_points(img1, pts1, desc1, img2, pts2, desc2, verbose)
+
+        # Estimate the fundamental matrix
+        fmatrix = get_fundamental_matrix(img1_matches, img2_matches, verbose)
+        # Stop after the first two images, for testing
         return
 
 
@@ -100,7 +103,6 @@ def get_feature_points(img, verbose=False, image_name='Img'):
         cv2.drawKeypoints(img, kp, disp_img)
         # Shrink the image so it can be displayed in a sensical way
         disp_img = downsize_img(disp_img)
-        print(disp_img.shape)
         cv2.imshow(image_name, disp_img)
         cv2.waitKey()
     # Return the keypoints and descriptors
@@ -127,28 +129,41 @@ def match_feature_points(img1, pts1, desc1, img2, pts2, desc2, verbose=False, im
     # Find the top 2 matches for each feature point
     matches = matcher.knnMatch(desc1, desc2, k=2)
     # Apply the ratio test: x is best match, y is second best match, lower distance is better
-    matches = [[x] for x, y in matches if x.distance < 0.75*y.distance]
+    matches = [x for x, y in matches if x.distance < 0.75*y.distance]
 
     if verbose:
         # Display the feature point matches between the two images
         disp_img = np.hstack((img1, img2))
-        cv2.drawMatchesKnn(img1, pts1, img2, pts2, matches, disp_img, flags=2)
+        cv2.drawMatches(img1, pts1, img2, pts2, matches, disp_img)
         disp_img = downsize_img(disp_img)
         cv2.imshow(image_name, disp_img)
         cv2.waitKey()
-    # Return the list of matches
-    return matches
+    # Extract the matched img1 points and img2 points from the matches list
+    matchedPts1 = np.array([pts1[match.queryIdx].pt for match in matches])
+    matchedPts2 = np.array([pts2[match.trainIdx].pt for match in matches])
+    # Return the list of matches, and list of matched points in img 1 and 2
+    return matches, matchedPts1, matchedPts2
 
-def get_fundamental_matrix(pt_matches, verbose=False):
+def get_fundamental_matrix(matchedPts1, matchedPts2, verbose=False):
     """Estimate the fundamental matrix
 
     NOTE: this is only valid for this pair of images
 
     :param pt_matches: the list of feature point matches. These should
         be from consecutive images
+    :param matchedPts1: the feature points in the first image
+    :param matchedPts2: the feature points in the second image
     :param verbose: as in pipeline()
     """
-    pass
+    fmatrix, fmap = cv2.findFundamentalMat(matchedPts1, matchedPts2, cv2.FM_RANSAC, 1, 0.99)
+    if verbose:
+        # Print the fundamental matrix
+        with np.printoptions(suppress=True):
+            print(fmatrix)
+        # Print the count of inliers and outliers
+        print("Inliers: {}\nOutliers: {}".format((fmap == 1).sum(), (fmap == 0).sum()))
+    # Return the fundamental matrix
+    return fmatrix
 
 def get_essential_matrix(fmatrix, k, verbose=False):
     """Compute the essential matrix
