@@ -11,12 +11,14 @@ import os
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 
-def pipeline(path_to_dataset, verbose=False):
+def pipeline(path_to_dataset, k, verbose=False):
     """Executes the entire pipeline
 
     The pipeline can also be executed one step at a time by calling the
     individual functions in order.
 
+    :param path_to_dataset: TODO
+    :param k: TODO
     :param verbose: whether output should be produced at each
         processing step (True), or only at the end (False)
 
@@ -44,6 +46,10 @@ def pipeline(path_to_dataset, verbose=False):
 
         # Estimate the fundamental matrix
         fmatrix = get_fundamental_matrix(img1_matches, img2_matches, verbose)
+
+        # Calculate the essential matrix
+        ematrix = get_essential_matrix(fmatrix, k, verbose)
+
         # Stop after the first two images, for testing
         return
 
@@ -158,6 +164,7 @@ def get_fundamental_matrix(matchedPts1, matchedPts2, verbose=False):
     fmatrix, fmap = cv2.findFundamentalMat(matchedPts1, matchedPts2, cv2.FM_RANSAC, 1, 0.99)
     if verbose:
         # Print the fundamental matrix
+        print("Fundamental matrix:")
         with np.printoptions(suppress=True):
             print(fmatrix)
         # Print the count of inliers and outliers
@@ -174,7 +181,16 @@ def get_essential_matrix(fmatrix, k, verbose=False):
         (it is assumed that this will be the same)
     :param verbose: as in pipeline()
     """
-    pass
+    # Essential matrix is calculated as E=K_1.T * F * K_2
+    # Since the same camera is used for the entire video sequence, K_1 == K_2 == k
+    ematrix = np.matmul(np.matmul(np.transpose(k), fmatrix), k)
+    if verbose:
+        # print the essential matrix
+        print("Essential matrix:")
+        with np.printoptions(suppress=True):
+            print(ematrix)
+    # Return the essential matrix
+    return ematrix
 
 def get_relative_rotation_translation(ematrix, verbose=False):
     """Compute the [R|t] matrix for img2/cam2 from img1/cam1
