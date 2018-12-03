@@ -39,6 +39,8 @@ def pipeline(path_to_dataset, verbose=False):
         # Extract feature points of the second image
         pts2, desc2 = get_feature_points(img2, verbose)
 
+        # Find the feature point matches between img1 and img2
+        matches = match_feature_points(img1, pts1, desc1, img2, pts2, desc2, verbose)
         # Stop after the first image, for testing
         return
 
@@ -85,8 +87,7 @@ def get_feature_points(img, verbose=False, image_name='Img'):
 
     :param img: the image from which to extract feature points
     :param verbose: as in pipeline()
-    :param image_name: the name of the image to be used if verbose
-        is True
+    :param image_name: the name of the image to be displayed
     """
     # Create the SURF feature detector
     detector = cv2.xfeatures2d.SURF_create(350)
@@ -97,23 +98,46 @@ def get_feature_points(img, verbose=False, image_name='Img'):
         # Display the image with its feature points
         disp_img = np.zeros_like(img)
         cv2.drawKeypoints(img, kp, disp_img)
+        # Shrink the image so it can be displayed in a sensical way
+        disp_img = downsize_img(disp_img)
+        print(disp_img.shape)
         cv2.imshow(image_name, disp_img)
         cv2.waitKey()
     # Return the keypoints and descriptors
     return kp, desc
 
-def match_feature_points(pts1, pts2, verbose=False):
+def match_feature_points(img1, pts1, desc1, img2, pts2, desc2, verbose=False, image_name='Feature point matches'):
     """Match feature points in the two images
 
     This should only be called on consecutive images, or correct
     matches are unlikely (or impossible) to be found.
 
+    :param img1: the first image
     :param pts1: feature points from the first image (should be the
         first image read)
+    :param desc1: the feature point descriptors of points in pts1
+    :param img2: the second image
     :param pts2: feature points from the second image
+    :param desc2: the feature point descriptors of points in pts2
     :param verbose: as in pipeline()
+    :param image_name: the name of the image to be displayed
     """
-    pass
+    # Create a feature point matcher
+    matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck=False)
+    # Find the top 2 matches for each feature point
+    matches = matcher.knnMatch(desc1, desc2, k=2)
+    # Apply the ratio test: x is best match, y is second best match, lower distance is better
+    matches = [[x] for x, y in matches if x.distance < 0.75*y.distance]
+
+    if verbose:
+        # Display the feature point matches between the two images
+        disp_img = np.hstack((img1, img2))
+        cv2.drawMatchesKnn(img1, pts1, img2, pts2, matches, disp_img, flags=2)
+        disp_img = downsize_img(disp_img)
+        cv2.imshow(image_name, disp_img)
+        cv2.waitKey()
+    # Return the list of matches
+    return matches
 
 def get_fundamental_matrix(pt_matches, verbose=False):
     """Estimate the fundamental matrix
@@ -190,6 +214,21 @@ def apply_bundle_adjustment():
     :param verbose: as in pipeline()
     """
     pass
+
+def downsize_img(img, wmax=1600, hmax=900):
+    """ Downsize the given image
+
+    Reduce the size of the input image to make it suitable for output.
+    The aspect ratio of the image is not changed.
+
+    :param img: the image to downsize
+    :param wmax: the maximum acceptable width
+    :param hmax: the maximum acceptable height
+    """
+    # Downsize img until its width is less than wmax and height is less than hmax
+    while img.shape[1] > wmax or img.shape[0] > hmax:
+        img = cv2.resize(img, None, fx=0.75, fy=0.75)
+    return img
 
 # BELOW: left in for reference while constructing the new pipeline above
 
