@@ -50,6 +50,9 @@ def pipeline(path_to_dataset, k, verbose=False):
         # Calculate the essential matrix
         ematrix = get_essential_matrix(fmatrix, k, verbose)
 
+        # Get the relative [R|t] matrix
+        get_relative_rotation_translation(ematrix, verbose)
+
         # Stop after the first two images, for testing
         return
 
@@ -161,7 +164,7 @@ def get_fundamental_matrix(matchedPts1, matchedPts2, verbose=False):
     :param matchedPts2: the feature points in the second image
     :param verbose: as in pipeline()
     """
-    fmatrix, fmap = cv2.findFundamentalMat(matchedPts1, matchedPts2, cv2.FM_RANSAC, 1, 0.99)
+    fmatrix, fmap = cv2.findFundamentalMat(matchedPts1, matchedPts2, cv2.FM_RANSAC, 3, 0.99)
     if verbose:
         # Print the fundamental matrix
         print("Fundamental matrix:")
@@ -199,7 +202,51 @@ def get_relative_rotation_translation(ematrix, verbose=False):
         images/cameras
     :param verbose: as in pipeline()
     """
-    pass
+    # Decompose the essential matrix through singular value decomposition to get U, s, V.T
+    U, s, V = np.linalg.svd(ematrix)
+    V = V.T # convert V.T to V
+
+    # Construct sigma as [[s, 0, 0], [0, s, 0], [0, 0, 0]]
+    # for the lowest value in s (list of possible s values, sorted so lowest value is at index -1)
+    sigma = np.array([s[-1], 0, 0, 0, s[-1], 0, 0, 0, 0]).reshape(3, 3)
+
+    # Construct W as [[0, -1, 0,], [1, 0, 0], [0, 0, 1]]. Note: W.T = W^(-1)
+    W = np.array([0, -1, 0, 1, 0, 0, 0, 0, 1]).reshape(3, 3)
+
+    # Compute R = U * W^(-1) * V.T
+    R = np.matmul(np.matmul(U, W.T), V.T)
+
+    # # Compute [t]_x = U * W * sigma * U.T
+    # t_x = np.matmul(np.matmul(np.matmul(U, W), sigma), U.T)
+    # # Extract the values of t from t_x, as t_x = 
+    #     #  0   -t_3  t_2
+    #     #  t_3  0   -t_1
+    #     # -t_2  t_1  0
+    # t = np.array([t_x[2][1], t_x[0][2], t_x[1][0]]).reshape(3, 1)
+
+    # Compute [t]_x using alternative definition of U * Z * U.T, where Z =
+        #  0 1 0
+        # -1 0 0
+        #  0 0 0
+    Z = np.array([0, 1, 0, -1, 0, 0, 0, 0, 0]).reshape(3, 3)
+    t_x = np.matmul(np.matmul(U, Z), U.T)
+    t = np.array([t_x[2][1], t_x[0][2], t_x[1][0]]).reshape(3, 1)
+
+    # Check if this [R|t] matrix actually makes sense, i.e. the 3D points produced are in front of the camera
+    # This must be done as there are four possible [R|t] matrices, but only one makes sense in practice
+    # The four possibilities are constructed through setting W = W.T and/or t = -t in the computation above
+    
+
+    # Construct [R|t] matrix
+    Rt = np.hstack((R, t))
+
+    if verbose:
+        # Print out the [R|t] matrix
+        print("[R|t] matrix:")
+        print(Rt)
+    
+    # Return the [R|t] matrix
+    return Rt
 
 def get_global_rotation_translation(global_Rt_list, verbose=False):
     """Compute the [R|t] matrix for img2/cam2 from the first img/cam
