@@ -3,7 +3,7 @@
 
 import numpy as np
 
-from pipeline import Pipeline
+from pipeline import *
 
 # Path to the directory containing the images to be used as input. The images should be present directly in this directory (i.e. not in folders inside it)
 master_path_to_dataset = 'C:/Users/simon/GitRepositories/SSAIV_ACV/Dataset/2015-03-27_10-47-08_Seq2/monocular_left_calibrated/'
@@ -39,22 +39,12 @@ def main():
         K = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8]).reshape(3, 3)
         d = np.array([0,1,2,3,4]).reshape(1, 5)
         cont = input("A different dataset than the one given with the assignment was detected.\nPlease ensure that the images in the directory are in chronological order, alphabetically (i.e. first image alphabetically is also first image chronologically)\nAlso ensure that you have inserted the correct camera intrinsics values into K and d in the code, after the comment '#HERE'.\nContinue? (y/n)")
-    if('y' != cont.lower() and 'yes' != cont.lower()):
-        quit()
+        if('y' != cont.lower() and 'yes' != cont.lower()):
+            quit()
 
 
-    # Create an instance of the Pipeline class
-    pipeline_instance = Pipeline(K, d)
-    # Execute the SfM pipeline on this image sequence
-
-    # load a pair of images for which to perform SfM
-    pipeline_instance.load_image_pair(master_path_to_dataset + "Images_cam0_7319.png", master_path_to_dataset + "Images_cam0_7320.png")
-
-    # draw 3D point cloud of fountain
-    # use "pan axes" button in pyplot to inspect the cloud (rotate and zoom
-    # to convince you of the result)
-    pipeline_instance.plot_point_cloud()
-
+    # Execute the SfM pipeline on the image sequence
+    pipeline(master_path_to_dataset, verbose=True)
 
 if __name__ == '__main__':
     main()
