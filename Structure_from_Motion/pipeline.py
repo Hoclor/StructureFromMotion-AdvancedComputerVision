@@ -21,7 +21,28 @@ def pipeline(path_to_dataset, verbose=False):
         processing step (True), or only at the end (False)
 
     """
-    pass
+    # Create the image loader
+    img_loader = Image_loader(path_to_dataset, verbose)
+    # load the first image into img2 (i.e. pretend we just processed this image in a previous pair)
+    img2 = img_loader.next()
+    # Extract feature points from this image
+    pts2, desc2 = get_feature_points(img2, verbose)
+    # Loop over all the other images
+    for count in range(1, img_loader.count):
+        # Move the last image (img2) into img1, and its points into pts1
+        img1 = img2
+        pts1, desc1 = pts2, desc2
+
+        # Load the next image into img2
+        img2 = img_loader.next()
+
+        # Extract feature points of the second image
+        pts2, desc2 = get_feature_points(img2, verbose)
+
+        # Stop after the first image, for testing
+        return
+
+
 
 class Image_loader:
     """Image_loader
@@ -36,7 +57,8 @@ class Image_loader:
         self.index = 0
         # Create an alphabetical list of all the images in the given directory
         with os.scandir(path_to_dataset) as file_iterator:
-            self.images = sorted(list(file_iterator))
+            self.images = sorted([file_object.name for file_object in list(file_iterator)])
+        self.count = len(self.images)
 
     def next(self):
         """Loads the next image from the given directory
@@ -44,6 +66,7 @@ class Image_loader:
         The images are loaded in alphabetical order, one at a time.
         """
         img = cv2.imread(self.path + self.images[self.index])
+        self.index += 1
         return img
     
     def reset(self, new_index=0):
@@ -55,15 +78,29 @@ class Image_loader:
         """
         index = new_index
 
-def get_feature_points(img, verbose=False):
+def get_feature_points(img, verbose=False, image_name='Img'):
     """Extract feature points
 
     Extracts SURF feature points from the given image.
 
     :param img: the image from which to extract feature points
     :param verbose: as in pipeline()
+    :param image_name: the name of the image to be used if verbose
+        is True
     """
-    pass
+    # Create the SURF feature detector
+    detector = cv2.xfeatures2d.SURF_create(350)
+    # Find the keypoints and descriptors in the image
+    kp, desc = detector.detectAndCompute(img, None)
+
+    if verbose:
+        # Display the image with its feature points
+        disp_img = np.zeros_like(img)
+        cv2.drawKeypoints(img, kp, disp_img)
+        cv2.imshow(image_name, disp_img)
+        cv2.waitKey()
+    # Return the keypoints and descriptors
+    return kp, desc
 
 def match_feature_points(pts1, pts2, verbose=False):
     """Match feature points in the two images
@@ -153,7 +190,6 @@ def apply_bundle_adjustment():
     :param verbose: as in pipeline()
     """
     pass
-
 
 # BELOW: left in for reference while constructing the new pipeline above
 
@@ -524,23 +560,23 @@ def apply_bundle_adjustment():
 
 #         return True
 
-#     def _linear_ls_triangulation(self, u1, P1, u2, P2):
-        """Triangulation via Linear-LS method"""
-        # build A matrix for homogeneous equation system Ax=0
-        # assume X = (x,y,z,1) for Linear-LS method
-        # which turns it into AX=B system, where A is 4x3, X is 3x1 & B is 4x1
-        A = np.array([u1[0]*P1[2, 0] - P1[0, 0], u1[0]*P1[2, 1] - P1[0, 1],
-                      u1[0]*P1[2, 2] - P1[0, 2], u1[1]*P1[2, 0] - P1[1, 0],
-                      u1[1]*P1[2, 1] - P1[1, 1], u1[1]*P1[2, 2] - P1[1, 2],
-                      u2[0]*P2[2, 0] - P2[0, 0], u2[0]*P2[2, 1] - P2[0, 1],
-                      u2[0]*P2[2, 2] - P2[0, 2], u2[1]*P2[2, 0] - P2[1, 0],
-                      u2[1]*P2[2, 1] - P2[1, 1],
-                      u2[1]*P2[2, 2] - P2[1, 2]]).reshape(4, 3)
+#    def _linear_ls_triangulation(self, u1, P1, u2, P2):
+#        """Triangulation via Linear-LS method"""
+#        # build A matrix for homogeneous equation system Ax=0
+#        # assume X = (x,y,z,1) for Linear-LS method
+#        # which turns it into AX=B system, where A is 4x3, X is 3x1 & B is 4x1
+#        A = np.array([u1[0]*P1[2, 0] - P1[0, 0], u1[0]*P1[2, 1] - P1[0, 1],
+#                      u1[0]*P1[2, 2] - P1[0, 2], u1[1]*P1[2, 0] - P1[1, 0],
+#                      u1[1]*P1[2, 1] - P1[1, 1], u1[1]*P1[2, 2] - P1[1, 2],
+#                      u2[0]*P2[2, 0] - P2[0, 0], u2[0]*P2[2, 1] - P2[0, 1],
+#                      u2[0]*P2[2, 2] - P2[0, 2], u2[1]*P2[2, 0] - P2[1, 0],
+#                      u2[1]*P2[2, 1] - P2[1, 1],
+#                      u2[1]*P2[2, 2] - P2[1, 2]]).reshape(4, 3)
 
-        B = np.array([-(u1[0]*P1[2, 3] - P1[0, 3]),
-                      -(u1[1]*P1[2, 3] - P1[1, 3]),
-                      -(u2[0]*P2[2, 3] - P2[0, 3]),
-                      -(u2[1]*P2[2, 3] - P2[1, 3])]).reshape(4, 1)
+#        B = np.array([-(u1[0]*P1[2, 3] - P1[0, 3]),
+#                      -(u1[1]*P1[2, 3] - P1[1, 3]),
+#                      -(u2[0]*P2[2, 3] - P2[0, 3]),
+#                      -(u2[1]*P2[2, 3] - P2[1, 3])]).reshape(4, 1)
 
-        ret, X = cv2.solve(A, B, flags=cv2.DECOMP_SVD)
-        return X.reshape(1, 3)
+#        ret, X = cv2.solve(A, B, flags=cv2.DECOMP_SVD)
+#        return X.reshape(1, 3)
