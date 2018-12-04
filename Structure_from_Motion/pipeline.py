@@ -29,9 +29,15 @@ def pipeline(path_to_dataset, k, verbose=False):
     img_loader = Image_loader(path_to_dataset, verbose)
     # load the first image into img2 (i.e. pretend we just processed this image in a previous pair)
     img2 = img_loader.next()
+    #img2 = img_loader.load('Images_cam0_6517.png')
+
     # Extract feature points from this image
     pts2, desc2 = get_feature_points(img2, verbose)
+
     # Loop over all the other images
+    global_Rt_list = []
+    rtmatrix1 = np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]).reshape(3, 4)
+    global_Rt_list.append(rtmatrix1)
     for count in range(1, img_loader.count):
         # Move the last image (img2) into img1, and its points into pts1
         img1 = img2
@@ -39,6 +45,7 @@ def pipeline(path_to_dataset, k, verbose=False):
 
         # Load the next image into img2
         img2 = img_loader.next()
+        #img2 = img_loader.load('Images_cam0_6518.png')
 
         # Extract feature points of the second image
         pts2, desc2 = get_feature_points(img2, verbose)
@@ -53,7 +60,15 @@ def pipeline(path_to_dataset, k, verbose=False):
         ematrix = get_essential_matrix(fmatrix, k, verbose)
 
         # Get the relative [R|t] matrix
-        get_relative_rotation_translation(ematrix, verbose)
+        rtmatrix2 = get_relative_rotation_translation(ematrix, verbose)
+
+        global_Rt_list.append(rtmatrix2)
+
+        # Triangulate the matched feature points
+        pts4D = triangulate_feature_points(global_Rt_list, img1_matches, img2_matches, k)
+
+        # Plot the 3D points
+        plot_point_cloud(pts4D, verbose)
 
         # Stop after the first two images, for testing
         return
@@ -123,7 +138,8 @@ def get_feature_points(img, verbose=False, image_name='Img'):
         # Shrink the image so it can be displayed in a sensical way
         disp_img = downsize_img(disp_img)
         cv2.imshow(image_name, disp_img)
-        cv2.waitKey()
+        if cv2.waitKey(0) == 113:
+            cv2.destroyWindow(image_name)
     # Return the keypoints and descriptors
     return kp, desc
 
@@ -148,7 +164,7 @@ def match_feature_points(img1, pts1, desc1, img2, pts2, desc2, verbose=False, im
     # Find the top 2 matches for each feature point
     matches = matcher.knnMatch(desc1, desc2, k=2)
     # Apply the ratio test: x is best match, y is second best match, lower distance is better
-    matches = [x for x, y in matches if x.distance < 0.75*y.distance]
+    matches = [x for x, y in matches if x.distance < 0.5*y.distance]
 
     if verbose:
         # Display the feature point matches between the two images
@@ -156,7 +172,8 @@ def match_feature_points(img1, pts1, desc1, img2, pts2, desc2, verbose=False, im
         cv2.drawMatches(img1, pts1, img2, pts2, matches, disp_img)
         disp_img = downsize_img(disp_img)
         cv2.imshow(image_name, disp_img)
-        cv2.waitKey()
+        if cv2.waitKey(0) == 113:
+            cv2.destroyWindow(image_name)
     # Extract the matched img1 points and img2 points from the matches list
     matchedPts1 = np.array([pts1[match.queryIdx].pt for match in matches])
     matchedPts2 = np.array([pts2[match.trainIdx].pt for match in matches])
@@ -174,7 +191,7 @@ def get_fundamental_matrix(matchedPts1, matchedPts2, verbose=False):
     :param matchedPts2: the feature points in the second image
     :param verbose: as in pipeline()
     """
-    fmatrix, fmap = cv2.findFundamentalMat(matchedPts1, matchedPts2, cv2.FM_RANSAC, 3, 0.99)
+    fmatrix, fmap = cv2.findFundamentalMat(matchedPts1, matchedPts2, cv2.FM_RANSAC, 0.5, 0.99)
     if verbose:
         # Print the fundamental matrix
         print("Fundamental matrix:")
@@ -222,6 +239,7 @@ def get_relative_rotation_translation(ematrix, verbose=False):
 
     # Construct W as [[0, -1, 0,], [1, 0, 0], [0, 0, 1]]. Note: W.T = W^(-1)
     W = np.array([0, -1, 0, 1, 0, 0, 0, 0, 1]).reshape(3, 3)
+    # W = W.T
 
     # Compute R = U * W^(-1) * V.T
     R = np.matmul(np.matmul(U, W.T), V.T)
@@ -246,7 +264,7 @@ def get_relative_rotation_translation(ematrix, verbose=False):
     # This must be done as there are four possible [R|t] matrices, but only one makes sense in practice
     # The four possibilities are constructed through setting W = W.T and/or t = -t in the computation above
     #TODO
-    
+
     # Construct [R|t] matrix
     Rt = np.hstack((R, t))
 
@@ -254,7 +272,7 @@ def get_relative_rotation_translation(ematrix, verbose=False):
         # Print out the [R|t] matrix
         print("[R|t] matrix:")
         with np.printoptions(suppress=True):
-        print(Rt)
+            print(Rt)
     
     # Return the [R|t] matrix
     return Rt
