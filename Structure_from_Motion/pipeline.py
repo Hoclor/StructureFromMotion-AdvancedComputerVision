@@ -8,8 +8,9 @@ import numpy as np
 import sys
 import os
 
-from mpl_toolkits.mplot3d import Axes3D
-import matplotlib.pyplot as plt
+#from mpl_toolkits.mplot3d import Axes3D
+#import matplotlib.pyplot as plt
+import open3d
 
 def pipeline(path_to_dataset, k, verbose=False):
     """Executes the entire pipeline
@@ -17,8 +18,9 @@ def pipeline(path_to_dataset, k, verbose=False):
     The pipeline can also be executed one step at a time by calling the
     individual functions in order.
 
-    :param path_to_dataset: TODO
-    :param k: TODO
+    :param path_to_dataset: the directory containing the dataset. This should only contain
+        the images of the dataset, ordered alphabetically (i.e. the first image is the first alphabetically)
+    :param k: the camera intrinsics matrix of the camera used to capture the dataset
     :param verbose: whether output should be produced at each
         processing step (True), or only at the end (False)
 
@@ -81,6 +83,14 @@ class Image_loader:
         """
         img = cv2.imread(self.path + self.images[self.index])
         self.index += 1
+        return img
+    
+    def load(self, img_name):
+        """Loads the image with the specified name
+        
+        Causes an error if there is no file with that name in the directory.
+        """
+        img = cv2.imread(self.path + img_name)
         return img
     
     def reset(self, new_index=0):
@@ -156,7 +166,7 @@ def match_feature_points(img1, pts1, desc1, img2, pts2, desc2, verbose=False, im
 def get_fundamental_matrix(matchedPts1, matchedPts2, verbose=False):
     """Estimate the fundamental matrix
 
-    NOTE: this is only valid for this pair of images
+    Note: this is only valid for this pair of images
 
     :param pt_matches: the list of feature point matches. These should
         be from consecutive images
@@ -235,14 +245,15 @@ def get_relative_rotation_translation(ematrix, verbose=False):
     # Check if this [R|t] matrix actually makes sense, i.e. the 3D points produced are in front of the camera
     # This must be done as there are four possible [R|t] matrices, but only one makes sense in practice
     # The four possibilities are constructed through setting W = W.T and/or t = -t in the computation above
+    #TODO
     
-
     # Construct [R|t] matrix
     Rt = np.hstack((R, t))
 
     if verbose:
         # Print out the [R|t] matrix
         print("[R|t] matrix:")
+        with np.printoptions(suppress=True):
         print(Rt)
     
     # Return the [R|t] matrix
@@ -257,7 +268,7 @@ def get_global_rotation_translation(global_Rt_list, verbose=False):
     """
     pass
 
-def triangulate_feature_points(Rt_list, pt_matches, verbose=False):
+def triangulate_feature_points(global_Rt_list, pts1, pts2, k, verbose=False):
     """Get 3D points through triangulation
 
     :param global_Rt_list: A list of all the global [R|t] matrices for all
@@ -265,7 +276,17 @@ def triangulate_feature_points(Rt_list, pt_matches, verbose=False):
     :param pt_matches: the list of feature point matches between img1 and img2
     :param verbose: as in pipeline()
     """
-    pass
+    # triangulate points
+    # first_inliers = np.array(pts1).reshape(-1, 3)[:, :2]
+    # second_inliers = np.array(pts2).reshape(-1, 3)[:, :2]
+    print(pts1.shape)
+    r_1 = global_Rt_list[0]
+    r_2 = global_Rt_list[1]
+    r_1 = np.matmul(k, r_1)
+    r_2 = np.matmul(k, r_2)
+    pts4D = cv2.triangulatePoints(r_1, r_2, pts1.T, pts2.T).T
+
+    return pts4D
 
 #TODO: if the above function only finds relative/local 3D position, this function is needed
 # def adjust_feature_points():
@@ -274,13 +295,33 @@ def triangulate_feature_points(Rt_list, pt_matches, verbose=False):
 #     """
 #     pass
 
-def plot_point_cloud(pts3D, verbose=False):
+def plot_point_cloud(pts4D, verbose=False):
     """Create a point cloud of all 3D points found so far
 
-    :param pts3D: a list of 3D points to be plotted
+    :param pts4D: a list of 3D points to be plotted
     :param verbose: as in pipeline()
     """
-    pass
+    # convert from homogeneous coordinates to 3D
+    pts3D = pts4D[:, :3]/np.repeat(pts4D[:, 3], 3).reshape(-1, 3)
+
+    pcd = open3d.PointCloud()
+    pcd.points = open3d.Vector3dVector(pts3D)
+    axes = open3d.create_mesh_coordinate_frame(size = 3, origin = [0, 0, 0])
+    open3d.draw_geometries([pcd, axes])
+    
+    # # plot with matplotlib
+    # Ys = pts3D[:, 0]
+    # Zs = pts3D[:, 1]
+    # Xs = pts3D[:, 2]
+
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111, projection='3d')
+    # ax.scatter(Xs, Ys, Zs, c='r', marker='o')
+    # ax.set_xlabel('Z')
+    # ax.set_ylabel('X')
+    # ax.set_zlabel('Y')
+    # plt.title('3D point cloud: Use pan axes button below to inspect')
+    # plt.show()
 
 #TODO
 def apply_bundle_adjustment():
