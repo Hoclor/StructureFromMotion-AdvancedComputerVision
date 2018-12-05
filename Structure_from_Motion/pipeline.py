@@ -74,7 +74,7 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         global_Rt_list = np.concatenate((global_Rt_list, global_rt_matrix_R.reshape(1, 3, 4)))
 
         # Triangulate the matched feature points
-        pts4D = triangulate_feature_points(global_Rt_list, imgL_matches, imgR_matches, k, fmap=fmap, verbose=verbose) #HYPERPARAM - fmap=fmap or []
+        pts4D = triangulate_feature_points(global_Rt_list, imgL_matches, imgR_matches, k, fmap=fmap, verbose=verbose)
 
         # Add the list of 4D pts to the list of all 4D pts
         if type(all_pts4D) != type(None):
@@ -146,7 +146,7 @@ def get_feature_points(img, verbose_img=False, image_name='Img'):
     :param image_name: the name of the image to be displayed
     """
     # Create the SURF feature detector
-    detector = cv2.xfeatures2d.SURF_create(350) #HYPERPARAM - 350
+    detector = cv2.xfeatures2d.SURF_create(350) #HYPERPARAM - 350, 750
     # Find the keypoints and descriptors in the image
     kp, desc = detector.detectAndCompute(img, None)
 
@@ -508,8 +508,7 @@ def plot_point_cloud(pts4D, pts4D_indices=[], method='open3d', verbose=False):
         [1, 0.5, 0.5],
         [0.5, 1, 0.5],
         [0.5, 0.5, 1],
-        [0, 0, 0],
-        [1, 1, 1]
+        [0, 0, 0]
     ]
 
     if(method == 'open3d'):
