@@ -60,18 +60,32 @@ def pipeline(path_to_dataset, k, verbose=False):
         ematrix = get_essential_matrix(fmatrix, k, verbose)
 
         # Get the relative [R|t] matrix
-        rtmatrix2 = get_relative_rotation_translation(ematrix, verbose)
+        rtmatrix2 = get_relative_rotation_translation(ematrix, k, img1_matches, img2_matches, verbose)
 
-        global_Rt_list.append(rtmatrix2)
+        # Convert the relative rtmatrix above into a global rtmatrix
+        global_rtmatrix2 = get_global_rotation_translation(global_Rt_list[-1, :, :], rtmatrix2, verbose)
+
+        # Add the new global [R|t] matrix to the list
+        global_Rt_list = np.concatenate((global_Rt_list, global_rtmatrix2.reshape(1, 3, 4)))
 
         # Triangulate the matched feature points
-        pts4D = triangulate_feature_points(global_Rt_list, img1_matches, img2_matches, k)
+        pts4D = triangulate_feature_points(global_Rt_list, img1_matches, img2_matches, k, verbose)
 
+        # Add the list of 4D pts to the list of all 4D pts
+        if type(all_pts4D) != type(None):
+            all_pts4D = np.concatenate((all_pts4D, pts4D))
+        else:
+            all_pts4D = pts4D
+
+        # plot_point_cloud(pts4D, verbose)
+        
         # Plot the 3D points
-        plot_point_cloud(pts4D, verbose)
+        if count >= 5:
+            plot_point_cloud(all_pts4D, 'open3d', verbose)
+            return
 
         # Stop after the first two images, for testing
-        return
+        # return
 
 
 
@@ -222,11 +236,13 @@ def get_essential_matrix(fmatrix, k, verbose=False):
     # Return the essential matrix
     return ematrix
 
-def get_relative_rotation_translation(ematrix, verbose=False):
+def get_relative_rotation_translation(ematrix, k, pts1, pts2, verbose=False):
     """Compute the [R|t] matrix for img2/cam2 from img1/cam1
 
     :param ematrix: the essential matrix corresponding to these two
         images/cameras
+    :param pts1: the matched points in the first image
+    :param pts2: the corresponding matched points in the second image
     :param verbose: as in pipeline()
     """
     # Decompose the essential matrix through singular value decomposition to get U, s, V.T
@@ -277,17 +293,46 @@ def get_relative_rotation_translation(ematrix, verbose=False):
     # Return the [R|t] matrix
     return Rt
 
-def get_global_rotation_translation(global_Rt_list, verbose=False):
+def get_global_rotation_translation(global_Rt_last, rtmatrix, verbose=False):
     """Compute the [R|t] matrix for img2/cam2 from the first img/cam
 
-    :param global_Rt_list: A list of all the global [R|t] matrices for all
-        previous images, in order
+    :param global_Rt_last: The global [R|t] matrices corresponding to the
+        previous image
+    :param rtmatrix: The [R|t] matrix corresponding to the next image, to
+        be converted into the global equivalent
     :param verbose: as in pipeline()
     """
-    pass
+    # Decompose the [R|t] matrices into R, t
+    R_0 = global_Rt_last[:, :3]
+    t_0 = global_Rt_last[:, 3]
+    R = rtmatrix[:, :3]
+    t = rtmatrix[:, 3]
+    
+
+    # Convert the rotation matrices to rotation vectors
+    R_0vec, _ = cv2.Rodrigues(R_0)
+    Rvec, _ = cv2.Rodrigues(R)
+
+    # Compose the new R and t vectors with the latest global R and t vectors (R_0, t_0)
+    global_R_vec, global_t, _, _, _, _, _, _, _, _ = cv2.composeRT(R_0vec, t_0, Rvec, t)
+
+    # Convert the R vector back into a matrix
+    global_R, _ = cv2.Rodrigues(global_R_vec)
+
+    # Create the global [R|t] matrix
+    global_Rt = np.hstack((global_R, global_t))
+
+    if verbose:
+        # Print the global_Rt matrix
+        print("Global [R|t] matrix:")
+        with np.printoptions(suppress=True):
+            print(global_Rt)
+
+    # Return the global_Rt
+    return global_Rt
 
 def triangulate_feature_points(global_Rt_list, pts1, pts2, k, verbose=False):
-    """Get 3D points through triangulation
+    """Get 4D (homogeneous) points through triangulation
 
     :param global_Rt_list: A list of all the global [R|t] matrices for all
         images processed so far, in order
@@ -298,8 +343,8 @@ def triangulate_feature_points(global_Rt_list, pts1, pts2, k, verbose=False):
     # first_inliers = np.array(pts1).reshape(-1, 3)[:, :2]
     # second_inliers = np.array(pts2).reshape(-1, 3)[:, :2]
     print(pts1.shape)
-    r_1 = global_Rt_list[0]
-    r_2 = global_Rt_list[1]
+    r_1 = global_Rt_list[-2, :, :]
+    r_2 = global_Rt_list[-1, :, :]
     r_1 = np.matmul(k, r_1)
     r_2 = np.matmul(k, r_2)
     pts4D = cv2.triangulatePoints(r_1, r_2, pts1.T, pts2.T).T
@@ -398,6 +443,26 @@ def downsize_img(img, wmax=1600, hmax=900):
     while img.shape[1] > wmax or img.shape[0] > hmax:
         img = cv2.resize(img, None, fx=0.75, fy=0.75)
     return img
+
+def _in_front_of_both_cameras(first_points, second_points, rot,
+                                trans):
+    """Determines whether point correspondences are in front of both
+    images.
+    Copied from https://github.com/mbeyeler/opencv-python-blueprints/tree/master/chapter4
+    """
+    for first, second in zip(first_points, second_points):
+        first_z = np.dot(rot[0, :] - second[0]*rot[2, :],
+                            trans) / np.dot(rot[0, :] - second[0]*rot[2, :],
+                                            second)
+        first_3d_point = np.array([first[0] * first_z,
+                                    second[0] * first_z, first_z])
+        second_3d_point = np.dot(rot.T, first_3d_point) - np.dot(rot.T,
+                                                                    trans)
+
+        if first_3d_point[2] < 0 or second_3d_point[2] < 0:
+            return False
+
+    return True
 
 # BELOW: left in for reference while constructing the new pipeline above
 
