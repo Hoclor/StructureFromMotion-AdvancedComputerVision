@@ -1,7 +1,7 @@
 # Dataset
 *.png
 .vscode/*
-
+temp.*
 
 
 ### Pre-generated ###
