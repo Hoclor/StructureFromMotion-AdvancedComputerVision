@@ -58,22 +58,22 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         matches, img1_matches, img2_matches = match_feature_points(img1, pts1, desc1, img2, pts2, desc2, verbose_img=verbose_img)
 
         # Estimate the fundamental matrix
-        fmatrix = get_fundamental_matrix(img1_matches, img2_matches, verbose)
+        fmatrix, fmap = get_fundamental_matrix(img1_matches, img2_matches, verbose=verbose)
 
         # Calculate the essential matrix
-        ematrix = get_essential_matrix(fmatrix, k, verbose)
+        ematrix = get_essential_matrix(fmatrix, k, verbose=verbose)
 
         # Get the relative [R|t] matrix
-        rtmatrix2 = get_relative_rotation_translation(ematrix, k, img1_matches, img2_matches, verbose)
+        rtmatrix2 = get_relative_rotation_translation(ematrix, k, img1_matches, img2_matches, fmap=fmap, verbose=verbose)
 
         # Convert the relative rtmatrix above into a global rtmatrix
-        global_rtmatrix2 = get_global_rotation_translation(global_Rt_list[-1, :, :], rtmatrix2, verbose)
+        global_rtmatrix2 = get_global_rotation_translation(global_Rt_list[-1, :, :], rtmatrix2, verbose=verbose)
 
         # Add the new global [R|t] matrix to the list
         global_Rt_list = np.concatenate((global_Rt_list, global_rtmatrix2.reshape(1, 3, 4)))
 
         # Triangulate the matched feature points
-        pts4D = triangulate_feature_points(global_Rt_list, img1_matches, img2_matches, k, verbose)
+        pts4D = triangulate_feature_points(global_Rt_list, img1_matches, img2_matches, k, verbose=verbose)
 
         # Add the list of 4D pts to the list of all 4D pts
         if type(all_pts4D) != type(None):
@@ -81,11 +81,11 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         else:
             all_pts4D = pts4D
 
-        # plot_point_cloud(pts4D, verbose)
+        # plot_point_cloud(pts4D, verbose=verbose)
         
         # Plot the 3D points
         if count >= 5:
-            plot_point_cloud(all_pts4D, 'open3d', verbose)
+            plot_point_cloud(all_pts4D, 'open3d', verbose=verbose)
             return
 
         # Stop after the first two images, for testing
@@ -108,6 +108,7 @@ class Image_loader:
         with os.scandir(path_to_dataset) as file_iterator:
             self.images = sorted([file_object.name for file_object in list(file_iterator)])
         self.count = len(self.images)
+        self.verbose=verbose
 
     def next(self):
         """Loads the next image from the given directory
@@ -218,7 +219,7 @@ def get_fundamental_matrix(matchedPts1, matchedPts2, verbose=False):
         # Print the count of inliers and outliers
         print("Inliers: {}\nOutliers: {}".format((fmap == 1).sum(), (fmap == 0).sum()))
     # Return the fundamental matrix
-    return fmatrix
+    return fmatrix, fmap
 
 def get_essential_matrix(fmatrix, k, verbose=False):
     """Compute the essential matrix
@@ -240,7 +241,7 @@ def get_essential_matrix(fmatrix, k, verbose=False):
     # Return the essential matrix
     return ematrix
 
-def get_relative_rotation_translation(ematrix, k, pts1, pts2, verbose=False):
+def _get_relative_rotation_translation_OLD(ematrix, k, pts1, pts2, verbose=False):
     """Compute the [R|t] matrix for img2/cam2 from img1/cam1
 
     :param ematrix: the essential matrix corresponding to these two
@@ -320,6 +321,34 @@ def get_relative_rotation_translation(ematrix, k, pts1, pts2, verbose=False):
         with np.printoptions(suppress=True):
             print(Rt)
     
+    # Return the [R|t] matrix
+    return Rt
+
+def get_relative_rotation_translation(ematrix, k, pts1, pts2, fmap=None, verbose=False):
+    """Compute the [R|t] matrix using cv2.recoverPose
+
+    :param ematrix: the essential matrix computed from pts1 and pts2
+    :param k: the camera intrinsics matrix of the camera used to capture
+        both image 1 and image 2
+    :param pts1: the feature points in image 1 with a match in image 2
+    :param pts2: the feature poitns in image 2 corresponding to pts1
+    :param fmap: A binary list denoting which points in pts1 and pts2
+        were inliers for the creation of the fundamental and essential
+        matrices
+    :param verbose: as in pipeline()
+    """    
+    # Use recoverPose to compute the R and t matrices
+    points, R, t, mask = cv2.recoverPose(ematrix, pts1, pts2, k, mask=fmap)
+    
+    # Create the [R|t] matrix by stacking R and t horizontally
+    Rt = np.hstack((R, t))
+
+    if verbose:
+        # Print the [R|t] matrix
+        print("[R|t] matrix:")
+        with np.printoptions(suppress=True):
+            print(Rt)
+
     # Return the [R|t] matrix
     return Rt
 
