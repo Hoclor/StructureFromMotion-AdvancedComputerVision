@@ -44,7 +44,7 @@ def main():
 
 
     # Execute the SfM pipeline on the image sequence
-    pipeline(master_path_to_dataset, K, verbose=True, verbose_img=False)
+    pipeline(master_path_to_dataset, K, verbose=True, verbose_img=True)
 
 if __name__ == '__main__':
     main()
