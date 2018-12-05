@@ -210,7 +210,7 @@ def get_fundamental_matrix(matchedPts1, matchedPts2, verbose=False):
     :param matchedPts2: the feature points in the second image
     :param verbose: as in pipeline()
     """
-    fmatrix, fmap = cv2.findFundamentalMat(matchedPts1, matchedPts2, cv2.FM_RANSAC, 0.5, 0.99)
+    fmatrix, fmap = cv2.findFundamentalMat(matchedPts1, matchedPts2, cv2.FM_RANSAC, 0.1, 0.999)
     if verbose:
         # Print the fundamental matrix
         print("Fundamental matrix:")
