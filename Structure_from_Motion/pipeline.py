@@ -422,13 +422,18 @@ def triangulate_feature_points(global_Rt_list, pts1, pts2, k, verbose=False):
     # triangulate points
     # first_inliers = np.array(pts1).reshape(-1, 3)[:, :2]
     # second_inliers = np.array(pts2).reshape(-1, 3)[:, :2]
-    print(pts1.shape)
     r_1 = global_Rt_list[-2, :, :]
-    r_2 = global_Rt_list[-1, :, :]
     r_1 = np.matmul(k, r_1)
+    r_2 = global_Rt_list[-1, :, :]
     r_2 = np.matmul(k, r_2)
+
     pts4D = cv2.triangulatePoints(r_1, r_2, pts1.T, pts2.T).T
 
+    if verbose:
+        # Print out how many points were triangulated
+        print("{} points triangulated".format(pts4D.shape[0]))
+
+    # Return the list of 4D (homogeneous) points
     return pts4D
 
 #TODO: if the above function only finds relative/local 3D position, this function is needed
