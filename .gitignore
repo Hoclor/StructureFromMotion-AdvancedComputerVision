@@ -2,6 +2,7 @@
 *.png
 .vscode/*
 temp.*
+report*
 
 
 ### Pre-generated ###
