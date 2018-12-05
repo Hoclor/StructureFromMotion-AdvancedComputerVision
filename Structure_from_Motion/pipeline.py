@@ -87,14 +87,12 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
 
         # plot_point_cloud(pts4D, verbose=verbose)
         
-        # Plot the 3D points
+        # Stop early for testing purposes
         if count >= 5:
+            break
+
+    # Plot the 3D points
             plot_point_cloud(all_pts4D, pts4D_indices=pts4D_indices, method='open3d', verbose=verbose)
-            return
-
-        # Stop after the first two images, for testing
-        # return
-
 
 
 class Image_loader:
