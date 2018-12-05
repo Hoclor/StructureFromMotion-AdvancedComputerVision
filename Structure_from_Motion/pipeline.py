@@ -30,13 +30,12 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
     """
     # Create the image loader
     img_loader = Image_loader(path_to_dataset, verbose)
-    # load the first image into img2 (i.e. pretend we just processed this image in a previous pair)
+    # load the first image into imgR (i.e. pretend we just processed this image in a previous pair)
     print('Processing image 1 out of {}'.format(img_loader.count))
-    img2 = img_loader.next()
-    #img2 = img_loader.load('Images_cam0_6517.png')
+    imgR = img_loader.next()
 
     # Extract feature points from this image
-    pts2, desc2 = get_feature_points(img2, verbose_img=verbose_img)
+    ptsR, descR = get_feature_points(imgR, verbose_img=verbose_img)
 
     # Initialize some variables used for the entire sequence
     rtmatrix1 = np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], dtype=np.float64).reshape(3, 4) # The global [R|t] matrix for image 1
@@ -46,37 +45,36 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
     # Loop over all the other images
     for count in range(1, img_loader.count):
         print('Processing image {} out of {}'.format(count+1, img_loader.count))
-        # Move the last image (img2) into img1, and its points into pts1
-        img1 = img2
-        pts1, desc1 = pts2, desc2
+        # Move the last image (imgR) into imgL, and its points into ptsL
+        imgL = imgR
+        ptsL, descL = ptsR, descR
 
-        # Load the next image into img2
-        img2 = img_loader.next()
-        #img2 = img_loader.load('Images_cam0_6518.png')
+        # Load the next image into imgR
+        imgR = img_loader.next()
 
         # Extract feature points of the second image
-        pts2, desc2 = get_feature_points(img2, verbose_img=verbose_img)
+        ptsR, descR = get_feature_points(imgR, verbose_img=verbose_img)
 
-        # Find the feature point matches between img1 and img2
-        matches, img1_matches, img2_matches = match_feature_points(img1, pts1, desc1, img2, pts2, desc2, verbose_img=verbose_img)
+        # Find the feature point matches between imgL and imgR
+        matches, imgL_matches, imgR_matches = match_feature_points(imgL, ptsL, descL, imgR, ptsR, descR, verbose_img=verbose_img)
 
         # Estimate the fundamental matrix
-        fmatrix, fmap = get_fundamental_matrix(img1_matches, img2_matches, verbose=verbose)
+        fmatrix, fmap = get_fundamental_matrix(imgL_matches, imgR_matches, verbose=verbose)
 
         # Calculate the essential matrix
         ematrix = get_essential_matrix(fmatrix, k, verbose=verbose)
 
         # Get the relative [R|t] matrix
-        rtmatrix2 = get_relative_rotation_translation(ematrix, k, img1_matches, img2_matches, fmap=fmap, verbose=verbose)
+        rt_matrix_R = get_relative_rotation_translation(ematrix, k, imgL_matches, imgR_matches, fmap=fmap, verbose=verbose)
 
         # Convert the relative rtmatrix above into a global rtmatrix
-        global_rtmatrix2 = get_global_rotation_translation(global_Rt_list[-1, :, :], rtmatrix2, verbose=verbose)
+        global_rt_matrix_R = get_global_rotation_translation(global_Rt_list[-1, :, :], rt_matrix_R, verbose=verbose)
 
         # Add the new global [R|t] matrix to the list
-        global_Rt_list = np.concatenate((global_Rt_list, global_rtmatrix2.reshape(1, 3, 4)))
+        global_Rt_list = np.concatenate((global_Rt_list, global_rt_matrix_R.reshape(1, 3, 4)))
 
         # Triangulate the matched feature points
-        pts4D = triangulate_feature_points(global_Rt_list, img1_matches, img2_matches, k, verbose=verbose)
+        pts4D = triangulate_feature_points(global_Rt_list, imgL_matches, imgR_matches, fmap, k, verbose=verbose)
 
         # Add the list of 4D pts to the list of all 4D pts
         if type(all_pts4D) != type(None):
@@ -92,7 +90,7 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
             break
 
     # Plot the 3D points
-            plot_point_cloud(all_pts4D, pts4D_indices=pts4D_indices, method='open3d', verbose=verbose)
+    plot_point_cloud(all_pts4D, pts4D_indices=pts4D_indices, method='open3d', verbose=verbose)
 
 
 class Image_loader:
@@ -164,55 +162,55 @@ def get_feature_points(img, verbose_img=False, image_name='Img'):
     # Return the keypoints and descriptors
     return kp, desc
 
-def match_feature_points(img1, pts1, desc1, img2, pts2, desc2, verbose_img=False, image_name='Feature point matches'):
+def match_feature_points(imgL, ptsL, descL, imgR, ptsR, descR, verbose_img=False, image_name='Feature point matches'):
     """Match feature points in the two images
 
     This should only be called on consecutive images, or correct
     matches are unlikely (or impossible) to be found.
 
-    :param img1: the first image
-    :param pts1: feature points from the first image (should be the
+    :param imgL: the first image
+    :param ptsL: feature points from the first image (should be the
         first image read)
-    :param desc1: the feature point descriptors of points in pts1
-    :param img2: the second image
-    :param pts2: feature points from the second image
-    :param desc2: the feature point descriptors of points in pts2
+    :param descL: the feature point descriptors of points in ptsL
+    :param imgR: the second image
+    :param ptsR: feature points from the second image
+    :param descR: the feature point descriptors of points in ptsR
     :param verbose_img: as in pipeline()
     :param image_name: the name of the image to be displayed
     """
     # Create a feature point matcher
     matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck=False)
     # Find the top 2 matches for each feature point
-    matches = matcher.knnMatch(desc1, desc2, k=2)
+    matches = matcher.knnMatch(descL, descR, k=2)
     # Apply the ratio test: x is best match, y is second best match, lower distance is better
     matches = [x for x, y in matches if x.distance < 0.5*y.distance]
 
     if verbose_img:
         # Display the feature point matches between the two images
-        disp_img = np.hstack((img1, img2))
-        cv2.drawMatches(img1, pts1, img2, pts2, matches, disp_img)
+        disp_img = np.hstack((imgL, imgR))
+        cv2.drawMatches(imgL, ptsL, imgR, ptsR, matches, disp_img)
         disp_img = downsize_img(disp_img)
         cv2.imshow(image_name, disp_img)
         if cv2.waitKey(0) == 113:
             cv2.destroyWindow(image_name)
-    # Extract the matched img1 points and img2 points from the matches list
-    matchedPts1 = np.array([pts1[match.queryIdx].pt for match in matches])
-    matchedPts2 = np.array([pts2[match.trainIdx].pt for match in matches])
+    # Extract the matched imgL points and imgR points from the matches list
+    matched_ptsL = np.array([ptsL[match.queryIdx].pt for match in matches])
+    matched_ptsR = np.array([ptsR[match.trainIdx].pt for match in matches])
     # Return the list of matches, and list of matched points in img 1 and 2
-    return matches, matchedPts1, matchedPts2
+    return matches, matched_ptsL, matched_ptsR
 
-def get_fundamental_matrix(matchedPts1, matchedPts2, verbose=False):
+def get_fundamental_matrix(matched_ptsL, matched_ptsR, verbose=False):
     """Estimate the fundamental matrix
 
     Note: this is only valid for this pair of images
 
     :param pt_matches: the list of feature point matches. These should
         be from consecutive images
-    :param matchedPts1: the feature points in the first image
-    :param matchedPts2: the feature points in the second image
+    :param matched_ptsL: the feature points in the first image
+    :param matched_ptsR: the feature points in the second image
     :param verbose: as in pipeline()
     """
-    fmatrix, fmap = cv2.findFundamentalMat(matchedPts1, matchedPts2, cv2.FM_RANSAC, 0.1, 0.999)
+    fmatrix, fmap = cv2.findFundamentalMat(matched_ptsL, matched_ptsR, cv2.FM_RANSAC, 0.1, 0.999)
     if verbose:
         # Print the fundamental matrix
         print("Fundamental matrix:")
@@ -243,13 +241,13 @@ def get_essential_matrix(fmatrix, k, verbose=False):
     # Return the essential matrix
     return ematrix
 
-def _get_relative_rotation_translation_OLD(ematrix, k, pts1, pts2, verbose=False):
-    """Compute the [R|t] matrix for img2/cam2 from img1/cam1
+def _get_relative_rotation_translation_OLD(ematrix, k, ptsL, ptsR, verbose=False):
+    """Compute the [R|t] matrix for imgR/camR from imgL/camL
 
     :param ematrix: the essential matrix corresponding to these two
         images/cameras
-    :param pts1: the matched points in the first image
-    :param pts2: the corresponding matched points in the second image
+    :param ptsL: the matched points in the first image
+    :param ptsR: the corresponding matched points in the second image
     :param verbose: as in pipeline()
     """
     def _in_front_of_both_cameras(first_points, second_points, rot,
@@ -271,6 +269,7 @@ def _get_relative_rotation_translation_OLD(ematrix, k, pts1, pts2, verbose=False
                 return False
 
         return True
+
     # Decompose the essential matrix through singular value decomposition to get U, s, V.T
     U, s, V = np.linalg.svd(ematrix)
     V = V.T # convert V.T to V
@@ -306,25 +305,25 @@ def _get_relative_rotation_translation_OLD(ematrix, k, pts1, pts2, verbose=False
     # This must be done as there are four possible [R|t] matrices, but only one makes sense in practice
     # The four possibilities are constructed through setting W = W.T and/or t = -t in the computation above
 
-    # Convert the input pts1 and pts2 to homogeneous coordinates
-    pts1_h = []
-    print("k:", k.shape)
-    for point in pts1:
-        pts1_h.append(np.linalg.inv(k).dot([point[0], point[1], 1.0]))
-    pts2_h = []
-    for point in pts2:
-        pts2_h.append(np.linalg.inv(k).dot([point[0], point[1], 1.0]))
-    if not _in_front_of_both_cameras(pts1_h, pts2_h, R, t):
+    # Convert the input ptsL and ptsR to homogeneous coordinates
+    ptsL_h = []
+    for point in ptsL:
+        ptsL_h.append(np.linalg.inv(k).dot([point[0], point[1], 1.0]))
+    ptsR_h = []
+    for point in ptsR:
+        ptsR_h.append(np.linalg.inv(k).dot([point[0], point[1], 1.0]))
+
+    if not _in_front_of_both_cameras(ptsL_h, ptsR_h, R, t):
         # Try t = -t
         t = np.negative(t)
 
         # Check again
-        if not _in_front_of_both_cameras(pts1_h, pts2_h, R, t):
+        if not _in_front_of_both_cameras(ptsL_h, ptsR_h, R, t):
             # Try W = W.T and t = -t
             R = np.matmul(np.matmul(U, W), V.T)
             
             # Check again
-            if not _in_front_of_both_cameras(pts1_h, pts2_h, R, t):
+            if not _in_front_of_both_cameras(ptsL_h, ptsR_h, R, t):
                 # It must now be W = W.T and t = t
                 t = np.negative(t)
     
@@ -334,100 +333,103 @@ def _get_relative_rotation_translation_OLD(ematrix, k, pts1, pts2, verbose=False
         R = np.negative(R)
 
     # Construct [R|t] matrix
-    Rt = np.hstack((R, t))
+    rt_matrix = np.hstack((R, t))
 
     if verbose:
         # Print out the [R|t] matrix
         print("[R|t] matrix:")
         with np.printoptions(suppress=True):
-            print(Rt)
+            print(rt_matrix)
     
     # Return the [R|t] matrix
-    return Rt
+    return rt_matrix
 
-def get_relative_rotation_translation(ematrix, k, pts1, pts2, fmap=None, verbose=False):
+def get_relative_rotation_translation(ematrix, k, ptsL, ptsR, fmap=None, verbose=False):
     """Compute the [R|t] matrix using cv2.recoverPose
 
-    :param ematrix: the essential matrix computed from pts1 and pts2
+    :param ematrix: the essential matrix computed from ptsL and ptsR
     :param k: the camera intrinsics matrix of the camera used to capture
         both image 1 and image 2
-    :param pts1: the feature points in image 1 with a match in image 2
-    :param pts2: the feature poitns in image 2 corresponding to pts1
-    :param fmap: A binary list denoting which points in pts1 and pts2
+    :param ptsL: the feature points in image 1 with a match in image 2
+    :param ptsR: the feature poitns in image 2 corresponding to ptsL
+    :param fmap: A binary list denoting which points in ptsL and ptsR
         were inliers for the creation of the fundamental and essential
         matrices
     :param verbose: as in pipeline()
     """    
     # Use recoverPose to compute the R and t matrices
-    points, R, t, mask = cv2.recoverPose(ematrix, pts1, pts2, k, mask=fmap)
+    points, R, t, mask = cv2.recoverPose(ematrix, ptsL, ptsR, k, mask=fmap)
     
     # Create the [R|t] matrix by stacking R and t horizontally
-    Rt = np.hstack((R, t))
+    rt_matrix = np.hstack((R, t))
 
     if verbose:
         # Print the [R|t] matrix
         print("[R|t] matrix:")
         with np.printoptions(suppress=True):
-            print(Rt)
+            print(rt_matrix)
 
     # Return the [R|t] matrix
-    return Rt
+    return rt_matrix
 
-def get_global_rotation_translation(global_Rt_last, rtmatrix, verbose=False):
-    """Compute the [R|t] matrix for img2/cam2 from the first img/cam
+def get_global_rotation_translation(global_rt_matrix_L, rt_matrix_R, verbose=False):
+    """Compute the [R|t] matrix for imgR/camR from the first img/cam
 
-    :param global_Rt_last: The global [R|t] matrices corresponding to the
+    :param global_rt_matrix_L: The global [R|t] matrices corresponding to the
         previous image
-    :param rtmatrix: The [R|t] matrix corresponding to the next image, to
+    :param rt_matrix_R: The [R|t] matrix corresponding to the next image, to
         be converted into the global equivalent
     :param verbose: as in pipeline()
     """
     # Decompose the [R|t] matrices into R, t
-    R_0 = global_Rt_last[:, :3]
-    t_0 = global_Rt_last[:, 3]
-    R_1 = rtmatrix[:, :3]
-    t_1 = rtmatrix[:, 3]
+    r_mat_L = global_rt_matrix_L[:, :3]
+    t_L = global_rt_matrix_L[:, 3]
+    r_mat_R = rt_matrix_R[:, :3]
+    t_R = rt_matrix_R[:, 3]
     
 
     # Convert the rotation matrices to rotation vectors
-    R_0vec, _ = cv2.Rodrigues(R_0)
-    R_1vec, _ = cv2.Rodrigues(R_1)
+    r_vec_L, _ = cv2.Rodrigues(r_mat_L)
+    r_vec_R, _ = cv2.Rodrigues(r_mat_R)
 
-    # Compose the new R and t vectors with the latest global R and t vectors (R_0, t_0)
-    global_R_vec, global_t, _, _, _, _, _, _, _, _ = cv2.composeRT(R_0vec, t_0, R_1vec, t_1)
+    # Compose the new R and t vectors with the latest global R and t vectors (r_mat_L, t_L)
+    global_r_vec_R, global_t_R, _, _, _, _, _, _, _, _ = cv2.composeRT(r_vec_L, t_L, r_vec_R, t_R)
 
     # Convert the R vector back into a matrix
-    global_R, _ = cv2.Rodrigues(global_R_vec)
+    global_r_mat_R, _ = cv2.Rodrigues(global_r_vec_R)
 
     # Create the global [R|t] matrix
-    global_Rt = np.hstack((global_R, global_t))
+    global_rt_R = np.hstack((global_r_mat_R, global_t_R))
 
     if verbose:
-        # Print the global_Rt matrix
+        # Print the global_rt_R matrix
         print("Global [R|t] matrix:")
         with np.printoptions(suppress=True):
-            print(global_Rt)
+            print(global_rt_R)
 
-    # Return the global_Rt
-    return global_Rt
+    # Return the global_rt_R
+    return global_rt_R
 
-def triangulate_feature_points(global_Rt_list, pts1, pts2, k, verbose=False):
+def triangulate_feature_points(global_Rt_list, ptsL, ptsR, fmap, k, verbose=False):
     """Get 4D (homogeneous) points through triangulation
 
     :param global_Rt_list: A list of all the global [R|t] matrices for all
         images processed so far, in order
-    :param pt_matches: the list of feature point matches between img1 and img2
+    :param ptsL: the matched points in the left image
+    :param ptsR: the matched points in the right image
+    :param fmap: a binary list mapping which matched points are inliers for
+        the fundamental matrix
     :param verbose: as in pipeline()
     """
     # triangulate points
-    # first_inliers = np.array(pts1).reshape(-1, 3)[:, :2]
-    # second_inliers = np.array(pts2).reshape(-1, 3)[:, :2]
-    r_1 = global_Rt_list[-2, :, :]
-    r_1 = np.matmul(k, r_1)
-    r_2 = global_Rt_list[-1, :, :]
-    r_2 = np.matmul(k, r_2)
+    # first_inliers = np.array(ptsL).reshape(-1, 3)[:, :2]
+    # second_inliers = np.array(ptsR).reshape(-1, 3)[:, :2]
+    r_L = global_Rt_list[-2, :, :]
+    r_L = np.matmul(k, r_L)
+    r_R = global_Rt_list[-1, :, :]
+    r_R = np.matmul(k, r_R)
 
-    pts4D = cv2.triangulatePoints(r_1, r_2, pts1.T, pts2.T).T
+    pts4D = cv2.triangulatePoints(r_L, r_R, ptsL.T, ptsR.T).T
 
     if verbose:
         # Print out how many points were triangulated
