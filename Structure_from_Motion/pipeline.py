@@ -12,18 +12,21 @@ from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
 import open3d
 
-def pipeline(path_to_dataset, k, verbose=False):
+def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
     """Executes the entire pipeline
 
     The pipeline can also be executed one step at a time by calling the
     individual functions in order.
 
-    :param path_to_dataset: the directory containing the dataset. This should only contain
-        the images of the dataset, ordered alphabetically (i.e. the first image is the first alphabetically)
-    :param k: the camera intrinsics matrix of the camera used to capture the dataset
-    :param verbose: whether output should be produced at each
-        processing step (True), or only at the end (False)
-
+    :param path_to_dataset: the directory containing the dataset. This
+        should only contain the images of the dataset, ordered
+        alphabetically (i.e. the first image is the first alphabetically)
+    :param k: the camera intrinsics matrix of the camera used to capture
+        the dataset
+    :param verbose: whether output should be produced at each processing
+        step (True), or only at the end (False)
+    :param verbose_img: whether image output should be produced where
+        relevant
     """
     # Create the image loader
     img_loader = Image_loader(path_to_dataset, verbose)
@@ -32,7 +35,7 @@ def pipeline(path_to_dataset, k, verbose=False):
     #img2 = img_loader.load('Images_cam0_6517.png')
 
     # Extract feature points from this image
-    pts2, desc2 = get_feature_points(img2, verbose)
+    pts2, desc2 = get_feature_points(img2, verbose_img=verbose_img)
 
     # Initialize some variables used for the entire sequence
     rtmatrix1 = np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], dtype=np.float64).reshape(3, 4) # The global [R|t] matrix for image 1
@@ -49,10 +52,10 @@ def pipeline(path_to_dataset, k, verbose=False):
         #img2 = img_loader.load('Images_cam0_6518.png')
 
         # Extract feature points of the second image
-        pts2, desc2 = get_feature_points(img2, verbose)
+        pts2, desc2 = get_feature_points(img2, verbose_img=verbose_img)
 
         # Find the feature point matches between img1 and img2
-        matches, img1_matches, img2_matches = match_feature_points(img1, pts1, desc1, img2, pts2, desc2, verbose)
+        matches, img1_matches, img2_matches = match_feature_points(img1, pts1, desc1, img2, pts2, desc2, verbose_img=verbose_img)
 
         # Estimate the fundamental matrix
         fmatrix = get_fundamental_matrix(img1_matches, img2_matches, verbose)
@@ -132,13 +135,13 @@ class Image_loader:
         """
         index = new_index
 
-def get_feature_points(img, verbose=False, image_name='Img'):
+def get_feature_points(img, verbose_img=False, image_name='Img'):
     """Extract feature points
 
     Extracts SURF feature points from the given image.
 
     :param img: the image from which to extract feature points
-    :param verbose: as in pipeline()
+    :param verbose_img: as in pipeline()
     :param image_name: the name of the image to be displayed
     """
     # Create the SURF feature detector
@@ -146,7 +149,7 @@ def get_feature_points(img, verbose=False, image_name='Img'):
     # Find the keypoints and descriptors in the image
     kp, desc = detector.detectAndCompute(img, None)
 
-    if verbose:
+    if verbose_img:
         # Display the image with its feature points
         disp_img = np.zeros_like(img)
         cv2.drawKeypoints(img, kp, disp_img)
@@ -158,7 +161,7 @@ def get_feature_points(img, verbose=False, image_name='Img'):
     # Return the keypoints and descriptors
     return kp, desc
 
-def match_feature_points(img1, pts1, desc1, img2, pts2, desc2, verbose=False, image_name='Feature point matches'):
+def match_feature_points(img1, pts1, desc1, img2, pts2, desc2, verbose_img=False, image_name='Feature point matches'):
     """Match feature points in the two images
 
     This should only be called on consecutive images, or correct
@@ -171,7 +174,7 @@ def match_feature_points(img1, pts1, desc1, img2, pts2, desc2, verbose=False, im
     :param img2: the second image
     :param pts2: feature points from the second image
     :param desc2: the feature point descriptors of points in pts2
-    :param verbose: as in pipeline()
+    :param verbose_img: as in pipeline()
     :param image_name: the name of the image to be displayed
     """
     # Create a feature point matcher
@@ -181,7 +184,7 @@ def match_feature_points(img1, pts1, desc1, img2, pts2, desc2, verbose=False, im
     # Apply the ratio test: x is best match, y is second best match, lower distance is better
     matches = [x for x, y in matches if x.distance < 0.5*y.distance]
 
-    if verbose:
+    if verbose_img:
         # Display the feature point matches between the two images
         disp_img = np.hstack((img1, img2))
         cv2.drawMatches(img1, pts1, img2, pts2, matches, disp_img)
