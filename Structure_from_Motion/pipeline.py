@@ -74,7 +74,7 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         global_Rt_list = np.concatenate((global_Rt_list, global_rt_matrix_R.reshape(1, 3, 4)))
 
         # Triangulate the matched feature points
-        pts4D = triangulate_feature_points(global_Rt_list, imgL_matches, imgR_matches, fmap, k, verbose=verbose)
+        pts4D = triangulate_feature_points(global_Rt_list, imgL_matches, imgR_matches, k, fmap=fmap, verbose=verbose) #HYPERPARAM - fmap=fmap or []
 
         # Add the list of 4D pts to the list of all 4D pts
         if type(all_pts4D) != type(None):
@@ -146,7 +146,7 @@ def get_feature_points(img, verbose_img=False, image_name='Img'):
     :param image_name: the name of the image to be displayed
     """
     # Create the SURF feature detector
-    detector = cv2.xfeatures2d.SURF_create(350)
+    detector = cv2.xfeatures2d.SURF_create(350) #HYPERPARAM - 350
     # Find the keypoints and descriptors in the image
     kp, desc = detector.detectAndCompute(img, None)
 
@@ -183,7 +183,7 @@ def match_feature_points(imgL, ptsL, descL, imgR, ptsR, descR, verbose_img=False
     # Find the top 2 matches for each feature point
     matches = matcher.knnMatch(descL, descR, k=2)
     # Apply the ratio test: x is best match, y is second best match, lower distance is better
-    matches = [x for x, y in matches if x.distance < 0.5*y.distance]
+    matches = [x for x, y in matches if x.distance < 0.5*y.distance] #HYPERPARAM - 0.5*distance
 
     if verbose_img:
         # Display the feature point matches between the two images
@@ -210,7 +210,7 @@ def get_fundamental_matrix(matched_ptsL, matched_ptsR, verbose=False):
     :param matched_ptsR: the feature points in the second image
     :param verbose: as in pipeline()
     """
-    fmatrix, fmap = cv2.findFundamentalMat(matched_ptsL, matched_ptsR, cv2.FM_RANSAC, 0.1, 0.999)
+    fmatrix, fmap = cv2.findFundamentalMat(matched_ptsL, matched_ptsR, cv2.FM_RANSAC, 0.1, 0.999) #HYPERPARAM - 0.1, 0.999
     if verbose:
         # Print the fundamental matrix
         print("Fundamental matrix:")
@@ -410,7 +410,7 @@ def get_global_rotation_translation(global_rt_matrix_L, rt_matrix_R, verbose=Fal
     # Return the global_rt_R
     return global_rt_R
 
-def triangulate_feature_points(global_Rt_list, ptsL, ptsR, fmap, k, verbose=False):
+def triangulate_feature_points(global_Rt_list, ptsL, ptsR, k, fmap=[], verbose=False):
     """Get 4D (homogeneous) points through triangulation
 
     :param global_Rt_list: A list of all the global [R|t] matrices for all
@@ -422,14 +422,27 @@ def triangulate_feature_points(global_Rt_list, ptsL, ptsR, fmap, k, verbose=Fals
     :param verbose: as in pipeline()
     """
     # triangulate points
-    # first_inliers = np.array(ptsL).reshape(-1, 3)[:, :2]
-    # second_inliers = np.array(ptsR).reshape(-1, 3)[:, :2]
     r_L = global_Rt_list[-2, :, :]
     r_L = np.matmul(k, r_L)
     r_R = global_Rt_list[-1, :, :]
     r_R = np.matmul(k, r_R)
 
-    pts4D = cv2.triangulatePoints(r_L, r_R, ptsL.T, ptsR.T).T
+    # If fmap was provided, filter out non-inliers
+    if len(fmap) > 0:
+        # Only triangulate points which were inliers for the fundamental matrix
+        inlier_pts_L = []; inlier_pts_R = []
+        for i in range(len(fmap)):
+            if fmap[i]:
+                inlier_pts_L.append(ptsL[i,:])
+                inlier_pts_R.append(ptsR[i,:])
+        
+        triang_pts_L = np.array(inlier_pts_L)
+        triang_pts_R = np.array(inlier_pts_R)
+    else:
+        triang_pts_L = ptsL
+        triang_pts_R = ptsR
+
+    pts4D = cv2.triangulatePoints(r_L, r_R, triang_pts_L.T, triang_pts_R.T).T
 
     if verbose:
         # Print out how many points were triangulated
