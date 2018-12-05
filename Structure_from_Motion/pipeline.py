@@ -250,6 +250,25 @@ def _get_relative_rotation_translation_OLD(ematrix, k, pts1, pts2, verbose=False
     :param pts2: the corresponding matched points in the second image
     :param verbose: as in pipeline()
     """
+    def _in_front_of_both_cameras(first_points, second_points, rot,
+                                    trans):
+        """Determines whether point correspondences are in front of both
+        images.
+        Copied from https://github.com/mbeyeler/opencv-python-blueprints/tree/master/chapter4
+        """
+        for first, second in zip(first_points, second_points):
+            first_z = np.dot(rot[0, :] - second[0]*rot[2, :],
+                                trans) / np.dot(rot[0, :] - second[0]*rot[2, :],
+                                                second)
+            first_3d_point = np.array([first[0] * first_z,
+                                        second[0] * first_z, first_z])
+            second_3d_point = np.dot(rot.T, first_3d_point) - np.dot(rot.T,
+                                                                        trans)
+
+            if first_3d_point[2] < 0 or second_3d_point[2] < 0:
+                return False
+
+        return True
     # Decompose the essential matrix through singular value decomposition to get U, s, V.T
     U, s, V = np.linalg.svd(ematrix)
     V = V.T # convert V.T to V
@@ -502,26 +521,6 @@ def downsize_img(img, wmax=1600, hmax=900):
     while img.shape[1] > wmax or img.shape[0] > hmax:
         img = cv2.resize(img, None, fx=0.75, fy=0.75)
     return img
-
-def _in_front_of_both_cameras(first_points, second_points, rot,
-                                trans):
-    """Determines whether point correspondences are in front of both
-    images.
-    Copied from https://github.com/mbeyeler/opencv-python-blueprints/tree/master/chapter4
-    """
-    for first, second in zip(first_points, second_points):
-        first_z = np.dot(rot[0, :] - second[0]*rot[2, :],
-                            trans) / np.dot(rot[0, :] - second[0]*rot[2, :],
-                                            second)
-        first_3d_point = np.array([first[0] * first_z,
-                                    second[0] * first_z, first_z])
-        second_3d_point = np.dot(rot.T, first_3d_point) - np.dot(rot.T,
-                                                                    trans)
-
-        if first_3d_point[2] < 0 or second_3d_point[2] < 0:
-            return False
-
-    return True
 
 # BELOW: left in for reference while constructing the new pipeline above
 
