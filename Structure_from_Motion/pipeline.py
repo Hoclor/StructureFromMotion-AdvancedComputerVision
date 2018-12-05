@@ -385,16 +385,16 @@ def get_global_rotation_translation(global_Rt_last, rtmatrix, verbose=False):
     # Decompose the [R|t] matrices into R, t
     R_0 = global_Rt_last[:, :3]
     t_0 = global_Rt_last[:, 3]
-    R = rtmatrix[:, :3]
-    t = rtmatrix[:, 3]
+    R_1 = rtmatrix[:, :3]
+    t_1 = rtmatrix[:, 3]
     
 
     # Convert the rotation matrices to rotation vectors
     R_0vec, _ = cv2.Rodrigues(R_0)
-    Rvec, _ = cv2.Rodrigues(R)
+    R_1vec, _ = cv2.Rodrigues(R_1)
 
     # Compose the new R and t vectors with the latest global R and t vectors (R_0, t_0)
-    global_R_vec, global_t, _, _, _, _, _, _, _, _ = cv2.composeRT(R_0vec, t_0, Rvec, t)
+    global_R_vec, global_t, _, _, _, _, _, _, _, _ = cv2.composeRT(R_0vec, t_0, R_1vec, t_1)
 
     # Convert the R vector back into a matrix
     global_R, _ = cv2.Rodrigues(global_R_vec)
