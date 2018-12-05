@@ -8,8 +8,8 @@ import numpy as np
 import sys
 import os
 
-#from mpl_toolkits.mplot3d import Axes3D
-#import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import matplotlib.pyplot as plt
 import open3d
 
 def pipeline(path_to_dataset, k, verbose=False):
@@ -313,33 +313,65 @@ def triangulate_feature_points(global_Rt_list, pts1, pts2, k, verbose=False):
 #     """
 #     pass
 
-def plot_point_cloud(pts4D, verbose=False):
+def plot_point_cloud(pts4D, method='open3d', verbose=False):
     """Create a point cloud of all 3D points found so far
 
     :param pts4D: a list of 3D points to be plotted
+    :param method: the method used to plot the points,
+        either 'open3d' or 'matplotlib'
     :param verbose: as in pipeline()
     """
     # convert from homogeneous coordinates to 3D
     pts3D = pts4D[:, :3]/np.repeat(pts4D[:, 3], 3).reshape(-1, 3)
+    # print(len(pts3D))
+    # pts3D = np.array([point for point in pts3D if point[0] < 20 and point[1] < 20 and point[2] < 20])
+    # print("Post processing:", len(pts3D))
 
+    # print(pts3D.shape)
+    # # Test the resulting Z coordinates
+    # test_x = sorted(pts3D[:][0])
+    # test_y = sorted(pts3D[:][1])
+    # test_z = sorted(pts3D[:][2])
+
+    # print("Lowest X:", test_x[0])
+    # print("Second highest X:", test_x[-2])
+    # print("Highest X:", test_x[-1])
+    # print("Lowest Y:", test_y[0])
+    # print("Second highest Y:", test_y[-2])
+    # print("Highest Y:", test_y[-1])
+    # print("Lowest Z:", test_z[0])
+    # print("Second highest Z:", test_z[-2])
+    # print("Highest z:", test_z[-1])
+
+    if(method == 'open3d'):
+        # Plot with open3d
     pcd = open3d.PointCloud()
-    pcd.points = open3d.Vector3dVector(pts3D)
-    axes = open3d.create_mesh_coordinate_frame(size = 3, origin = [0, 0, 0])
-    open3d.draw_geometries([pcd, axes])
-    
-    # # plot with matplotlib
-    # Ys = pts3D[:, 0]
-    # Zs = pts3D[:, 1]
-    # Xs = pts3D[:, 2]
+        pcd.points = open3d.Vector3dVector(pts3D[:2562])
+        pcd.paint_uniform_color([1, 0, 0])
+        pcd2 = open3d.PointCloud()
+        pcd2.points = open3d.Vector3dVector(pts3D[2562:5067])
+        pcd2.paint_uniform_color([0, 0, 1])
+        pcd3 = open3d.PointCloud()
+        pcd3.points = open3d.Vector3dVector(pts3D[5067:])
+        pcd3.paint_uniform_color([0, 1, 0])
 
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111, projection='3d')
-    # ax.scatter(Xs, Ys, Zs, c='r', marker='o')
-    # ax.set_xlabel('Z')
-    # ax.set_ylabel('X')
-    # ax.set_zlabel('Y')
-    # plt.title('3D point cloud: Use pan axes button below to inspect')
-    # plt.show()
+    axes = open3d.create_mesh_coordinate_frame(size = 3, origin = [0, 0, 0])
+        open3d.draw_geometries([pcd, pcd2, pcd3, axes])
+    
+    elif(method == 'matplotlib'):
+        # Plot with matplotlib
+        Xs = pts3D[:, 0] #Ys
+        Ys = pts3D[:, 1] #Zs
+        Zs = pts3D[:, 2] #Xs
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        ax.scatter(Xs, Ys, Zs, c='r', marker='o')
+        ax.set_xlabel('X') #Z
+        ax.set_ylabel('Y') #X
+        ax.set_zlabel('Z') #Y
+        plt.title('3D point cloud: Use pan axes button below to inspect')
+        plt.show()
 
 #TODO
 def apply_bundle_adjustment():
