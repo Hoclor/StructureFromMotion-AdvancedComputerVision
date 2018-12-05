@@ -31,6 +31,7 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
     # Create the image loader
     img_loader = Image_loader(path_to_dataset, verbose)
     # load the first image into img2 (i.e. pretend we just processed this image in a previous pair)
+    print('Processing image 1 out of {}'.format(img_loader.count))
     img2 = img_loader.next()
     #img2 = img_loader.load('Images_cam0_6517.png')
 
@@ -44,6 +45,7 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
     pts4D_indices = [0]
     # Loop over all the other images
     for count in range(1, img_loader.count):
+        print('Processing image {} out of {}'.format(count+1, img_loader.count))
         # Move the last image (img2) into img1, and its points into pts1
         img1 = img2
         pts1, desc1 = pts2, desc2
