@@ -3,7 +3,7 @@
 
 import numpy as np
 
-from pipeline import Pipeline
+from pipeline import *
 
 # Path to the directory containing the images to be used as input. The images should be present directly in this directory (i.e. not in folders inside it)
 master_path_to_dataset = 'C:/Users/simon/GitRepositories/SSAIV_ACV/Dataset/2015-03-27_10-47-08_Seq2/monocular_left_calibrated/'
@@ -45,19 +45,8 @@ def main():
             quit()
 
 
-    # Create an instance of the Pipeline class
-    pipeline_instance = Pipeline(K, d)
-    # Execute the SfM pipeline on this image sequence
-
-    # load a pair of images for which to perform SfM
-    pipeline_instance.load_image_pair(master_path_to_dataset + "Images_cam0_7319.png", master_path_to_dataset + "Images_cam0_7320.png")
-
-    pipeline_instance.plot_rectified_images()
-    # draw 3D point cloud of fountain
-    # use "pan axes" button in pyplot to inspect the cloud (rotate and zoom
-    # to convince you of the result)
-    pipeline_instance.plot_point_cloud()
-
+    # Execute the SfM pipeline on the image sequence
+    pipeline(master_path_to_dataset, K, verbose=False, verbose_img=False)
 
 if __name__ == '__main__':
     main()

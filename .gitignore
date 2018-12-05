@@ -2,6 +2,8 @@
 *.png
 .vscode/*
 Structure_from_Motion/cycleimages.py
+temp.*
+report*
 
 
 ### Pre-generated ###

@@ -1,6 +1,3 @@
-# Original file copied from https://github.com/mbeyeler/opencv-python-blueprints/tree/master/chapter4
-# and edited to fit the task of the assignment
-
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
@@ -9,428 +6,574 @@
 import cv2
 import numpy as np
 import sys
+import os
 
 from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
+import open3d
 
+def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
+    """Executes the entire pipeline
 
-class Pipeline:
-    """Pipeline
+    The pipeline can also be executed one step at a time by calling the
+    individual functions in order.
 
-        This class implements an algorithm for 3D scene reconstruction using
-        stereo vision and structure-from-motion techniques.
-
-        A 3D scene is reconstructed from a sequence of images that show the same
-        real-world scene from several different viewpoints. Feature matching is
-        performed with rich feature descriptors. 3D coordinates are obtained via
-        triangulation.
-
-        Additionally, bundle adjustment is performed at the end to optimise the output.
+    :param path_to_dataset: the directory containing the dataset. This
+        should only contain the images of the dataset, ordered
+        alphabetically (i.e. the first image is the first alphabetically)
+    :param k: the camera intrinsics matrix of the camera used to capture
+        the dataset
+    :param verbose: whether output should be produced at each processing
+        step (True), or only at the end (False)
+    :param verbose_img: whether image output should be produced where
+        relevant
     """
-    def __init__(self, K, dist):
-        """Constructor
+    # Create the image loader
+    img_loader = Image_loader(path_to_dataset, verbose)
+    # load the first image into imgR (i.e. pretend we just processed this image in a previous pair)
+    print('Processing image 1 out of {}'.format(img_loader.count))
+    imgR = img_loader.next()
 
-            This method initializes the scene reconstruction algorithm.
+    # Extract feature points from this image
+    ptsR, descR = get_feature_points(imgR, verbose_img=verbose_img)
 
-            :param K: 3x3 intrinsic camera matrix
-            :param dist: vector of distortion coefficients
-        """
-        self.K = K
-        self.K_inv = np.linalg.inv(K)  # store inverse for fast access
-        self.d = dist
+    # Initialize some variables used for the entire sequence
+    rtmatrix1 = np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], dtype=np.float64).reshape(3, 4) # The global [R|t] matrix for image 1
+    global_Rt_list = rtmatrix1.reshape(1, 3, 4) # List of the global [R|t] matrices for each image
+    all_pts4D = None # List of all 4D points, to be plotted at the end
+    pts4D_indices = [0]
+    # Loop over all the other images
+    for count in range(1, img_loader.count):
+        print('Processing image {} out of {}'.format(count+1, img_loader.count))
+        # Move the last image (imgR) into imgL, and its points into ptsL
+        imgL = imgR
+        ptsL, descL = ptsR, descR
 
-    def load_image_pair(self, img_path1, img_path2, use_pyr_down=True):
-        """Loads pair of images
+        # Load the next image into imgR
+        imgR = img_loader.next()
 
-            This method loads the two images for which the 3D scene should be
-            reconstructed. The two images should show the same real-world scene
-            from two different viewpoints.
+        # Extract feature points of the second image
+        ptsR, descR = get_feature_points(imgR, verbose_img=verbose_img)
 
-            :param img_path1: path to first image
-            :param img_path2: path to second image
-            :param use_pyr_down: flag whether to downscale the images to
-                                 roughly 600px width (True) or not (False)
-        """
-        self.img1 = cv2.imread(img_path1, cv2.CV_8UC3)
-        self.img2 = cv2.imread(img_path2, cv2.CV_8UC3)
+        # Find the feature point matches between imgL and imgR
+        matches, imgL_matches, imgR_matches = match_feature_points(imgL, ptsL, descL, imgR, ptsR, descR, verbose_img=verbose_img)
 
-        # show the two images side-by-side
-        cv2.imshow("img1, img2", np.hstack((self.img1, self.img2)))
-        cv2.waitKey()
+        # Estimate the fundamental matrix
+        fmatrix, fmap = get_fundamental_matrix(imgL_matches, imgR_matches, verbose=verbose)
 
-        # make sure images are valid
-        if self.img1 is None:
-            sys.exit("Image " + img_path1 + " could not be loaded.")
-        if self.img2 is None:
-            sys.exit("Image " + img_path2 + " could not be loaded.")
+        # Calculate the essential matrix
+        ematrix = get_essential_matrix(fmatrix, k, verbose=verbose)
 
-        if len(self.img1.shape) == 2:
-            self.img1 = cv2.cvtColor(self.img1, cv2.COLOR_GRAY2BGR)
-            self.img2 = cv2.cvtColor(self.img2, cv2.COLOR_GRAY2BGR)
+        # Get the relative [R|t] matrix
+        rt_matrix_R = get_relative_rotation_translation(ematrix, k, imgL_matches, imgR_matches, fmap=fmap, verbose=verbose)
 
-        # scale down image if necessary
-        # to something close to 600px wide
-        # target_width = 600
-        # if use_pyr_down and self.img1.shape[1] > target_width:
-        #     while self.img1.shape[1] > 2*target_width:
-        #         self.img1 = cv2.pyrDown(self.img1)
-        #         self.img2 = cv2.pyrDown(self.img2)
+        # Convert the relative rtmatrix above into a global rtmatrix
+        global_rt_matrix_R = get_global_rotation_translation(global_Rt_list[-1, :, :], rt_matrix_R, verbose=verbose)
 
-        # don't undistort the images as they are already calibrated
-        self.img1 = cv2.undistort(self.img1, self.K, self.d)
-        self.img2 = cv2.undistort(self.img2, self.K, self.d)
+        # Add the new global [R|t] matrix to the list
+        global_Rt_list = np.concatenate((global_Rt_list, global_rt_matrix_R.reshape(1, 3, 4)))
 
-    def plot_optic_flow(self):
-        """Plots optic flow field
+        # Triangulate the matched feature points
+        pts4D = triangulate_feature_points(global_Rt_list, imgL_matches, imgR_matches, k, fmap=fmap, verbose=verbose)
 
-            This method plots the optic flow between the first and second
-            image.
-        """
-        self._extract_keypoints("flow")
-
-        img = self.img1
-        for i in range(len(self.match_pts1)):
-            cv2.line(img, tuple(self.match_pts1[i]), tuple(self.match_pts2[i]),
-                     color=(255, 0, 0))
-            theta = np.arctan2(self.match_pts2[i][1] - self.match_pts1[i][1],
-                               self.match_pts2[i][0] - self.match_pts1[i][0])
-            cv2.line(img, tuple(self.match_pts2[i]),
-                     (np.int(self.match_pts2[i][0] - 6*np.cos(theta+np.pi/4)),
-                      np.int(self.match_pts2[i][1] - 6*np.sin(theta+np.pi/4))),
-                     color=(255, 0, 0))
-            cv2.line(img, tuple(self.match_pts2[i]),
-                     (np.int(self.match_pts2[i][0] - 6*np.cos(theta-np.pi/4)),
-                      np.int(self.match_pts2[i][1] - 6*np.sin(theta-np.pi/4))),
-                     color=(255, 0, 0))
-
-        cv2.imshow("imgFlow", img)
-        cv2.waitKey()
-
-    def draw_epipolar_lines(self, feat_mode="SURF"):
-        """Draws epipolar lines
-
-            This method computes and draws the epipolar lines of the two
-            loaded images.
-
-            :param feat_mode: whether to use rich descriptors for feature
-                              matching ("surf") or optic flow ("flow")
-        """
-        self._extract_keypoints(feat_mode)
-        self._find_fundamental_matrix()
-        # Find epilines corresponding to points in right image (second image)
-        # and drawing its lines on left image
-        pts2re = self.match_pts2.reshape(-1, 1, 2)
-        lines1 = cv2.computeCorrespondEpilines(pts2re, 2, self.F)
-        lines1 = lines1.reshape(-1, 3)
-        img3, img4 = self._draw_epipolar_lines_helper(self.img1, self.img2,
-                                                      lines1, self.match_pts1,
-                                                      self.match_pts2)
-
-        # Find epilines corresponding to points in left image (first image) and
-        # drawing its lines on right image
-        pts1re = self.match_pts1.reshape(-1, 1, 2)
-        lines2 = cv2.computeCorrespondEpilines(pts1re, 1, self.F)
-        lines2 = lines2.reshape(-1, 3)
-        img1, img2 = self._draw_epipolar_lines_helper(self.img2, self.img1,
-                                                      lines2, self.match_pts2,
-                                                      self.match_pts1)
-
-        cv2.imshow("left", img1)
-        cv2.imshow("right", img3)
-        cv2.waitKey()
-
-    def plot_rectified_images(self, feat_mode="SURF"):
-        """Plots rectified images
-
-            This method computes and plots a rectified version of the two
-            images side by side.
-
-            :param feat_mode: whether to use rich descriptors for feature
-                              matching ("surf") or optic flow ("flow")
-        """
-        self._extract_keypoints(feat_mode)
-        self._find_fundamental_matrix()
-        self._find_essential_matrix()
-        self._find_camera_matrices_rt()
-
-        R = self.Rt2[:, :3]
-        T = self.Rt2[:, 3]
-        #perform the rectification
-        R1, R2, P1, P2, Q, roi1, roi2 = cv2.stereoRectify(self.K, self.d,
-                                                          self.K, self.d,
-                                                          self.img1.shape[:2],
-                                                          R, T, alpha=1.0)
-        mapx1, mapy1 = cv2.initUndistortRectifyMap(self.K, self.d, R1, self.K,
-                                                   self.img1.shape[:2],
-                                                   cv2.CV_32F)
-        mapx2, mapy2 = cv2.initUndistortRectifyMap(self.K, self.d, R2, self.K,
-                                                   self.img2.shape[:2],
-                                                   cv2.CV_32F)
-        img_rect1 = cv2.remap(self.img1, mapx1, mapy1, cv2.INTER_LINEAR)
-        img_rect2 = cv2.remap(self.img2, mapx2, mapy2, cv2.INTER_LINEAR)
-
-        # draw the images side by side
-        total_size = (max(img_rect1.shape[0], img_rect2.shape[0]),
-                      img_rect1.shape[1] + img_rect2.shape[1], 3)
-        img = np.zeros(total_size, dtype=np.uint8)
-        img[:img_rect1.shape[0], :img_rect1.shape[1]] = img_rect1
-        img[:img_rect2.shape[0], img_rect1.shape[1]:] = img_rect2
-
-        # draw horizontal lines every 25 px accross the side by side image
-        for i in range(20, img.shape[0], 25):
-            cv2.line(img, (0, i), (img.shape[1], i), (255, 0, 0))
-
-        cv2.imshow('imgRectified', img)
-        cv2.waitKey()
-
-    def plot_point_cloud(self, feat_mode="SURF"):
-        """Plots 3D point cloud
-
-            This method generates and plots a 3D point cloud of the recovered
-            3D scene.
-
-            :param feat_mode: whether to use rich descriptors for feature
-                              matching ("surf") or optic flow ("flow")
-        """
-        self._extract_keypoints(feat_mode)
-        self._find_fundamental_matrix()
-        self._find_essential_matrix()
-        self._find_camera_matrices_rt()
-
-        # triangulate points
-        first_inliers = np.array(self.match_inliers1).reshape(-1, 3)[:, :2]
-        second_inliers = np.array(self.match_inliers2).reshape(-1, 3)[:, :2]
-        pts4D = cv2.triangulatePoints(self.Rt1, self.Rt2, first_inliers.T,
-                                      second_inliers.T).T
-
-        # convert from homogeneous coordinates to 3D
-        pts3D = pts4D[:, :3]/np.repeat(pts4D[:, 3], 3).reshape(-1, 3)
-
-        # plot with matplotlib
-        Ys = pts3D[:, 0]
-        Zs = pts3D[:, 1]
-        Xs = pts3D[:, 2]
-
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        ax.scatter(Xs, Ys, Zs, c='r', marker='o')
-        ax.set_xlabel('Y')
-        ax.set_ylabel('Z')
-        ax.set_zlabel('X')
-        plt.title('3D point cloud: Use pan axes button below to inspect')
-        plt.show()
-
-    def _extract_keypoints(self, feat_mode):
-        """Extracts keypoints
-
-            This method extracts keypoints for feature matching based on
-            a specified mode:
-            - "surf": use rich SURF descriptor
-            - "flow": use optic flow
-
-            :param feat_mode: keypoint extraction mode ("surf" or "flow")
-        """
-        # extract features
-        if feat_mode.lower() == "surf":
-            # feature matching via SURF and BFMatcher
-            self._extract_keypoints_surf()
+        # Add the list of 4D pts to the list of all 4D pts
+        if type(all_pts4D) != type(None):
+            pts4D_indices.append(len(all_pts4D))
+            all_pts4D = np.concatenate((all_pts4D, pts4D))
         else:
-            if feat_mode.lower() == "flow":
-                # feature matching via optic flow
-                self._extract_keypoints_flow()
-            else:
-                sys.exit("Unknown feat_mode " + feat_mode +
-                         ". Use 'SURF' or 'FLOW'")
+            all_pts4D = pts4D
 
-    def _extract_keypoints_surf(self):
-        """Extracts keypoints via SURF descriptors"""
-        # extract keypoints and descriptors from both images
-        detector = cv2.xfeatures2d.SURF_create(350)
-
-        first_key_points, first_desc = detector.detectAndCompute(self.img1,
-                                                                 None)
-        second_key_points, second_desc = detector.detectAndCompute(self.img2,
-                                                                   None)
-
-        # match descriptors
-        matcher = cv2.BFMatcher(normType=cv2.NORM_L2, crossCheck=False) # False if using knnMatch, True otherwise
-        # Extract the top 2 matches for each point so we can perform ratio test
-        matches = matcher.knnMatch(first_desc, second_desc, k=2)
-        # matches = matcher.match(first_desc, second_desc)
-
-        # Keep only matches with a ratio of at most 0.75 (i.e. #1 match < 0.75*#2 match)
-        matches = [first for first, second in matches if first.distance < 0.75*second.distance]
-        # Keep only the matches with distance below 0.5 (to remove bad/faulty matches that could negatively impact results)
-        matches = [x for x in matches if x.distance < 0.1] # < 0.3
-
-        print('Number of feature point matches:', len(matches))
+        # plot_point_cloud(pts4D, verbose=verbose)
         
-        # Draw and show the matches
-        # img3 = np.zeros((960, 2560, 3))
-        # img3 = cv2.drawMatches(self.img1, first_key_points, self.img2, second_key_points, matches, img3, flags=2)
-        # plt.imshow(img3), plt.show()
+        # Stop early for testing purposes
+        if count >= 200:
+            break
 
-        # generate lists of point correspondences
-        first_match_points = np.zeros((len(matches), 2), dtype=np.float32)
-        second_match_points = np.zeros_like(first_match_points)
-        for i in range(len(matches)):
-            first_match_points[i] = first_key_points[matches[i].queryIdx].pt
-            second_match_points[i] = second_key_points[matches[i].trainIdx].pt
+    # Plot the 3D points
+    plot_point_cloud(all_pts4D, pts4D_indices=pts4D_indices, method='open3d', verbose=verbose)
 
-        self.match_pts1 = first_match_points
-        self.match_pts2 = second_match_points
 
-    def _extract_keypoints_flow(self):
-        """Extracts keypoints via optic flow"""
-        # find FAST features
-        fast = cv2.FastFeatureDetector()
-        first_key_points = fast.detect(self.img1, None)
+class Image_loader:
+    """Image_loader
 
-        first_key_list = [i.pt for i in first_key_points]
-        first_key_arr = np.array(first_key_list).astype(np.float32)
+        This class handles loading images to use as input to the pipeline.
 
-        second_key_arr, status, err = cv2.calcOpticalFlowPyrLK(self.img1,
-                                                               self.img2,
-                                                               first_key_arr)
+        Once initiated, the next image is loaded through next().
 
-        # filter out the points with high error
-        # keep only entries with status=1 and small error
-        condition = (status == 1) * (err < 5.)
-        concat = np.concatenate((condition, condition), axis=1)
-        first_match_points = first_key_arr[concat].reshape(-1, 2)
-        second_match_points = second_key_arr[concat].reshape(-1, 2)
+    """
+    def __init__(self, path_to_dataset, verbose=False):
+        self.path = path_to_dataset
+        self.index = 0
+        # Create an alphabetical list of all the images in the given directory
+        with os.scandir(path_to_dataset) as file_iterator:
+            self.images = sorted([file_object.name for file_object in list(file_iterator)])
+        self.count = len(self.images)
+        self.verbose=verbose
 
-        self.match_pts1 = first_match_points
-        self.match_pts2 = second_match_points
+    def next(self):
+        """Loads the next image from the given directory
 
-    def _find_fundamental_matrix(self):
-        """Estimates fundamental matrix """
-        # Uses RANSAC to produce an improved estimate of the fundamental matrix
-        self.F, self.Fmask = cv2.findFundamentalMat(self.match_pts1,
-                                                    self.match_pts2,
-                                                    cv2.FM_RANSAC, 0.1, 0.999)
+        The images are loaded in alphabetical order, one at a time.
+        """
+        img = cv2.imread(self.path + self.images[self.index])
+        self.index += 1
+        return img
+    
+    def load(self, img_name):
+        """Loads the image with the specified name
+        
+        Causes an error if there is no file with that name in the directory.
+        """
+        img = cv2.imread(self.path + img_name)
+        return img
+    
+    def reset(self, new_index=0):
+        """Resets the index counter
 
-    def _find_essential_matrix(self):
-        """Estimates essential matrix based on fundamental matrix """
-        self.E = self.K.T.dot(self.F).dot(self.K)
+        Sets the index counter to the given value.
+
+        :param new_index: The index to reset to. Default 0.
+        """
+        index = new_index
+
+def get_feature_points(img, verbose_img=False, image_name='Img'):
+    """Extract feature points
+
+    Extracts SURF feature points from the given image.
+
+    :param img: the image from which to extract feature points
+    :param verbose_img: as in pipeline()
+    :param image_name: the name of the image to be displayed
+    """
+    # Create the SURF feature detector
+    detector = cv2.xfeatures2d.SURF_create(350) #HYPERPARAM - 350, 750
+    # Find the keypoints and descriptors in the image
+    kp, desc = detector.detectAndCompute(img, None)
+
+    if verbose_img:
+        # Display the image with its feature points
+        disp_img = np.zeros_like(img)
+        cv2.drawKeypoints(img, kp, disp_img)
+        # Shrink the image so it can be displayed in a sensical way
+        disp_img = downsize_img(disp_img)
+        cv2.imshow(image_name, disp_img)
+        if cv2.waitKey(0) == 113:
+            cv2.destroyWindow(image_name)
+    # Return the keypoints and descriptors
+    return kp, desc
+
+def match_feature_points(imgL, ptsL, descL, imgR, ptsR, descR, verbose_img=False, image_name='Feature point matches'):
+    """Match feature points in the two images
+
+    This should only be called on consecutive images, or correct
+    matches are unlikely (or impossible) to be found.
+
+    :param imgL: the first image
+    :param ptsL: feature points from the first image (should be the
+        first image read)
+    :param descL: the feature point descriptors of points in ptsL
+    :param imgR: the second image
+    :param ptsR: feature points from the second image
+    :param descR: the feature point descriptors of points in ptsR
+    :param verbose_img: as in pipeline()
+    :param image_name: the name of the image to be displayed
+    """
+    # Create a feature point matcher
+    matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck=False)
+    # Find the top 2 matches for each feature point
+    matches = matcher.knnMatch(descL, descR, k=2)
+    # Apply the ratio test: x is best match, y is second best match, lower distance is better
+    matches = [x for x, y in matches if x.distance < 0.5*y.distance] #HYPERPARAM - 0.5*distance
+
+    if verbose_img:
+        # Display the feature point matches between the two images
+        disp_img = np.hstack((imgL, imgR))
+        cv2.drawMatches(imgL, ptsL, imgR, ptsR, matches, disp_img)
+        disp_img = downsize_img(disp_img)
+        cv2.imshow(image_name, disp_img)
+        if cv2.waitKey(0) == 113:
+            cv2.destroyWindow(image_name)
+    # Extract the matched imgL points and imgR points from the matches list
+    matched_ptsL = np.array([ptsL[match.queryIdx].pt for match in matches])
+    matched_ptsR = np.array([ptsR[match.trainIdx].pt for match in matches])
+    # Return the list of matches, and list of matched points in img 1 and 2
+    return matches, matched_ptsL, matched_ptsR
+
+def get_fundamental_matrix(matched_ptsL, matched_ptsR, verbose=False):
+    """Estimate the fundamental matrix
+
+    Note: this is only valid for this pair of images
+
+    :param pt_matches: the list of feature point matches. These should
+        be from consecutive images
+    :param matched_ptsL: the feature points in the first image
+    :param matched_ptsR: the feature points in the second image
+    :param verbose: as in pipeline()
+    """
+    fmatrix, fmap = cv2.findFundamentalMat(matched_ptsL, matched_ptsR, cv2.FM_RANSAC, 0.1, 0.999) #HYPERPARAM - 0.1, 0.999
+    if verbose:
+        # Print the fundamental matrix
+        print("Fundamental matrix:")
+        with np.printoptions(suppress=True):
+            print(fmatrix)
+        # Print the count of inliers and outliers
+        print("Inliers: {}\nOutliers: {}".format((fmap == 1).sum(), (fmap == 0).sum()))
+    # Return the fundamental matrix
+    return fmatrix, fmap
+
+def get_essential_matrix(fmatrix, k, verbose=False):
+    """Compute the essential matrix
+
+    :param fmatrix: the fundamental matrix corresponding to this
+        essential matrix
+    :param k: the camera intrinsics relevant to the two images
+        (it is assumed that this will be the same)
+    :param verbose: as in pipeline()
+    """
+    # Essential matrix is calculated as E=K_1.T * F * K_2
+    # Since the same camera is used for the entire video sequence, K_1 == K_2 == k
+    ematrix = np.matmul(np.matmul(np.transpose(k), fmatrix), k)
+    if verbose:
+        # print the essential matrix
         print("Essential matrix:")
-        print(self.E)
+        with np.printoptions(suppress=True):
+            print(ematrix)
+    # Return the essential matrix
+    return ematrix
 
-    def _find_camera_matrices_rt(self):
-        """Finds the [R|t] camera matrix"""
-        # decompose essential matrix into R, t (See Hartley and Zisserman 9.13)
-        U, S, Vt = np.linalg.svd(self.E)
-        W = np.array([0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0,
-                      1.0]).reshape(3, 3)
+def _get_relative_rotation_translation_OLD(ematrix, k, ptsL, ptsR, verbose=False):
+    """Compute the [R|t] matrix for imgR/camR from imgL/camL
 
-        # iterate over all point correspondences used in the estimation of the
-        # fundamental matrix
-        first_inliers = []
-        second_inliers = []
-        for i in range(len(self.Fmask)):
-            if self.Fmask[i]:
-                # normalize and homogenize the image coordinates
-                first_inliers.append(self.K_inv.dot([self.match_pts1[i][0],
-                                     self.match_pts1[i][1], 1.0]))
-                second_inliers.append(self.K_inv.dot([self.match_pts2[i][0],
-                                      self.match_pts2[i][1], 1.0]))
-
-        # Determine the correct choice of second camera matrix
-        # only in one of the four configurations will all the points be in
-        # front of both cameras
-        # First choice: R = U * W * Vt, T = +u_3 (See Hartley Zisserman 9.19)
-        R = U.dot(W.T).dot(Vt)
-        # Create sigma - lowest singular value of E will be in last index of S
-        sigma = np.array([S[-1], 0, 0, 0, S[-1], 0, 0, 0, 0]).reshape(3, 3)
-        T_x = U.dot(W).dot(sigma).dot(U.T)
-        # Alternatively
-        # Z = np.array([0, 1, 0, -1, 0, 0, 0, 0, 0]).reshape(3, 3)
-        # T_x = U.dot(Z).dot(U.T)
-        # Extract T from T_x ~=
-        # [0, -T3, T2]
-        # [T3, 0, -T1]
-        # [-T2, T1, 0]
-        # Average these pairs of T values, in case they are not exact
-        T = np.array([sum([-T_x[1][2], T_x[2][1]])/2, sum([T_x[0][2], -T_x[2][0]])/2, sum([-T_x[0][2], T_x[1][0]])/2]).reshape(3, 1)
-        if not self._in_front_of_both_cameras(first_inliers, second_inliers,
-                                              R, T):
-            # Second choice: R = U * W * Vt, T = -u_3
-            R = U.dot(W).dot(Vt)
-
-        if not self._in_front_of_both_cameras(first_inliers, second_inliers,
-                                              R, T):
-            # Third choice: R = U * Wt * Vt, T = u_3
-            R = U.dot(W.T).dot(Vt)
-            T = np.negative(T)
-
-            if not self._in_front_of_both_cameras(first_inliers,
-                                                  second_inliers, R, T):
-                # Fourth choice: R = U * Wt * Vt, T = -u_3
-                R = U.dot(W).dot(Vt)
-
-        self.match_inliers1 = first_inliers
-        self.match_inliers2 = second_inliers
-        self.Rt1 = np.hstack((np.eye(3), np.zeros((3, 1))))
-        self.Rt2 = np.hstack((R, T.reshape(3, 1)))
-        # Print Rt
-        print("Cam1 [R|t] matrix:")
-        print(self.Rt1)
-        print("Cam2 [R|t] matrix:")
-        print(self.Rt2)
-
-    def _draw_epipolar_lines_helper(self, img1, img2, lines, pts1, pts2):
-        """Helper method to draw epipolar lines and features """
-        if img1.shape[2] == 1:
-            img1 = cv2.cvtColor(img1, cv2.COLOR_GRAY2BGR)
-        if img2.shape[2] == 1:
-            img2 = cv2.cvtColor(img2, cv2.COLOR_GRAY2BGR)
-
-        c = img1.shape[1]
-        for r, pt1, pt2 in zip(lines, pts1, pts2):
-            color = tuple(np.random.randint(0, 255, 3).tolist())
-            x0, y0 = map(int, [0, -r[2]/r[1]])
-            x1, y1 = map(int, [c, -(r[2] + r[0]*c) / r[1]])
-            cv2.line(img1, (x0, y0), (x1, y1), color, 1)
-            cv2.circle(img1, tuple(pt1), 5, color, -1)
-            cv2.circle(img2, tuple(pt2), 5, color, -1)
-        return img1, img2
-
-    def _in_front_of_both_cameras(self, first_points, second_points, rot,
-                                  trans):
+    :param ematrix: the essential matrix corresponding to these two
+        images/cameras
+    :param ptsL: the matched points in the first image
+    :param ptsR: the corresponding matched points in the second image
+    :param verbose: as in pipeline()
+    """
+    def _in_front_of_both_cameras(first_points, second_points, rot,
+                                    trans):
         """Determines whether point correspondences are in front of both
-           images"""
-        rot_inv = rot
+        images.
+        Copied from https://github.com/mbeyeler/opencv-python-blueprints/tree/master/chapter4
+        """
         for first, second in zip(first_points, second_points):
             first_z = np.dot(rot[0, :] - second[0]*rot[2, :],
-                             trans) / np.dot(rot[0, :] - second[0]*rot[2, :],
-                                             second)
+                                trans) / np.dot(rot[0, :] - second[0]*rot[2, :],
+                                                second)
             first_3d_point = np.array([first[0] * first_z,
-                                       second[0] * first_z, first_z])
+                                        second[0] * first_z, first_z])
             second_3d_point = np.dot(rot.T, first_3d_point) - np.dot(rot.T,
-                                                                     trans)
+                                                                        trans)
 
             if first_3d_point[2] < 0 or second_3d_point[2] < 0:
                 return False
 
         return True
 
-    def _linear_ls_triangulation(self, u1, P1, u2, P2):
-        """Triangulation via Linear-LS method"""
-        # build A matrix for homogeneous equation system Ax=0
-        # assume X = (x,y,z,1) for Linear-LS method
-        # which turns it into AX=B system, where A is 4x3, X is 3x1 & B is 4x1
-        A = np.array([u1[0]*P1[2, 0] - P1[0, 0], u1[0]*P1[2, 1] - P1[0, 1],
-                      u1[0]*P1[2, 2] - P1[0, 2], u1[1]*P1[2, 0] - P1[1, 0],
-                      u1[1]*P1[2, 1] - P1[1, 1], u1[1]*P1[2, 2] - P1[1, 2],
-                      u2[0]*P2[2, 0] - P2[0, 0], u2[0]*P2[2, 1] - P2[0, 1],
-                      u2[0]*P2[2, 2] - P2[0, 2], u2[1]*P2[2, 0] - P2[1, 0],
-                      u2[1]*P2[2, 1] - P2[1, 1],
-                      u2[1]*P2[2, 2] - P2[1, 2]]).reshape(4, 3)
+    # Decompose the essential matrix through singular value decomposition to get U, s, V.T
+    U, s, V = np.linalg.svd(ematrix)
+    V = V.T # convert V.T to V
 
-        B = np.array([-(u1[0]*P1[2, 3] - P1[0, 3]),
-                      -(u1[1]*P1[2, 3] - P1[1, 3]),
-                      -(u2[0]*P2[2, 3] - P2[0, 3]),
-                      -(u2[1]*P2[2, 3] - P2[1, 3])]).reshape(4, 1)
+    # Construct sigma as [[s, 0, 0], [0, s, 0], [0, 0, 0]]
+    # for the lowest value in s (list of possible s values, sorted so lowest value is at index -1)
+    sigma = np.array([s[-1], 0, 0, 0, s[-1], 0, 0, 0, 0]).reshape(3, 3)
 
-        ret, X = cv2.solve(A, B, flags=cv2.DECOMP_SVD)
-        return X.reshape(1, 3)
+    # Construct W as [[0, -1, 0,], [1, 0, 0], [0, 0, 1]]. Note: W.T = W^(-1)
+    W = np.array([0, -1, 0, 1, 0, 0, 0, 0, 1]).reshape(3, 3)
+    # W = W.T
+
+    # Compute R = U * W^(-1) * V.T
+    R = np.matmul(np.matmul(U, W.T), V.T)
+
+    # # Compute [t]_x = U * W * sigma * U.T
+    # t_x = np.matmul(np.matmul(np.matmul(U, W), sigma), U.T)
+    # # Extract the values of t from t_x, as t_x = 
+    #     #  0   -t_3  t_2
+    #     #  t_3  0   -t_1
+    #     # -t_2  t_1  0
+    # t = np.array([t_x[2][1], t_x[0][2], t_x[1][0]]).reshape(3, 1)
+
+    # Compute [t]_x using alternative definition of U * Z * U.T, where Z =
+        #  0 1 0
+        # -1 0 0
+        #  0 0 0
+    Z = np.array([0, 1, 0, -1, 0, 0, 0, 0, 0]).reshape(3, 3)
+    t_x = np.matmul(np.matmul(U, Z), U.T)
+    t = np.array([t_x[2][1], t_x[0][2], t_x[1][0]]).reshape(3, 1)
+
+    # Check if this [R|t] matrix actually makes sense, i.e. the 3D points produced are in front of the camera
+    # This must be done as there are four possible [R|t] matrices, but only one makes sense in practice
+    # The four possibilities are constructed through setting W = W.T and/or t = -t in the computation above
+
+    # Convert the input ptsL and ptsR to homogeneous coordinates
+    ptsL_h = []
+    for point in ptsL:
+        ptsL_h.append(np.linalg.inv(k).dot([point[0], point[1], 1.0]))
+    ptsR_h = []
+    for point in ptsR:
+        ptsR_h.append(np.linalg.inv(k).dot([point[0], point[1], 1.0]))
+
+    if not _in_front_of_both_cameras(ptsL_h, ptsR_h, R, t):
+        # Try t = -t
+        t = np.negative(t)
+
+        # Check again
+        if not _in_front_of_both_cameras(ptsL_h, ptsR_h, R, t):
+            # Try W = W.T and t = -t
+            R = np.matmul(np.matmul(U, W), V.T)
+            
+            # Check again
+            if not _in_front_of_both_cameras(ptsL_h, ptsR_h, R, t):
+                # It must now be W = W.T and t = t
+                t = np.negative(t)
+    
+    #HACK
+    # Check if the diagonal of R is all negative values. If so, negate R
+    if R[0, 0] < 0 and R[1, 1] < 0 and R[2, 2] < 0:
+        R = np.negative(R)
+
+    # Construct [R|t] matrix
+    rt_matrix = np.hstack((R, t))
+
+    if verbose:
+        # Print out the [R|t] matrix
+        print("[R|t] matrix:")
+        with np.printoptions(suppress=True):
+            print(rt_matrix)
+    
+    # Return the [R|t] matrix
+    return rt_matrix
+
+def get_relative_rotation_translation(ematrix, k, ptsL, ptsR, fmap=None, verbose=False):
+    """Compute the [R|t] matrix using cv2.recoverPose
+
+    :param ematrix: the essential matrix computed from ptsL and ptsR
+    :param k: the camera intrinsics matrix of the camera used to capture
+        both image 1 and image 2
+    :param ptsL: the feature points in image 1 with a match in image 2
+    :param ptsR: the feature poitns in image 2 corresponding to ptsL
+    :param fmap: A binary list denoting which points in ptsL and ptsR
+        were inliers for the creation of the fundamental and essential
+        matrices
+    :param verbose: as in pipeline()
+    """    
+    # Use recoverPose to compute the R and t matrices
+    points, R, t, mask = cv2.recoverPose(ematrix, ptsL, ptsR, k, mask=fmap)
+    
+    # Create the [R|t] matrix by stacking R and t horizontally
+    rt_matrix = np.hstack((R, t))
+
+    if verbose:
+        # Print the [R|t] matrix
+        print("[R|t] matrix:")
+        with np.printoptions(suppress=True):
+            print(rt_matrix)
+
+    # Return the [R|t] matrix
+    return rt_matrix
+
+def get_global_rotation_translation(global_rt_matrix_L, rt_matrix_R, verbose=False):
+    """Compute the [R|t] matrix for imgR/camR from the first img/cam
+
+    :param global_rt_matrix_L: The global [R|t] matrices corresponding to the
+        previous image
+    :param rt_matrix_R: The [R|t] matrix corresponding to the next image, to
+        be converted into the global equivalent
+    :param verbose: as in pipeline()
+    """
+    # Decompose the [R|t] matrices into R, t
+    r_mat_L = global_rt_matrix_L[:, :3]
+    t_L = global_rt_matrix_L[:, 3]
+    r_mat_R = rt_matrix_R[:, :3]
+    t_R = rt_matrix_R[:, 3]
+    
+
+    # Convert the rotation matrices to rotation vectors
+    r_vec_L, _ = cv2.Rodrigues(r_mat_L)
+    r_vec_R, _ = cv2.Rodrigues(r_mat_R)
+
+    # Compose the new R and t vectors with the latest global R and t vectors (r_mat_L, t_L)
+    global_r_vec_R, global_t_R, _, _, _, _, _, _, _, _ = cv2.composeRT(r_vec_L, t_L, r_vec_R, t_R)
+
+    # Convert the R vector back into a matrix
+    global_r_mat_R, _ = cv2.Rodrigues(global_r_vec_R)
+
+    # Create the global [R|t] matrix
+    global_rt_R = np.hstack((global_r_mat_R, global_t_R))
+
+    if verbose:
+        # Print the global_rt_R matrix
+        print("Global [R|t] matrix:")
+        with np.printoptions(suppress=True):
+            print(global_rt_R)
+
+    # Return the global_rt_R
+    return global_rt_R
+
+def triangulate_feature_points(global_Rt_list, ptsL, ptsR, k, fmap=[], verbose=False):
+    """Get 4D (homogeneous) points through triangulation
+
+    :param global_Rt_list: A list of all the global [R|t] matrices for all
+        images processed so far, in order
+    :param ptsL: the matched points in the left image
+    :param ptsR: the matched points in the right image
+    :param fmap: a binary list mapping which matched points are inliers for
+        the fundamental matrix
+    :param verbose: as in pipeline()
+    """
+    # triangulate points
+    r_L = global_Rt_list[-2, :, :]
+    r_L = np.matmul(k, r_L)
+    r_R = global_Rt_list[-1, :, :]
+    r_R = np.matmul(k, r_R)
+
+    # If fmap was provided, filter out non-inliers
+    if len(fmap) > 0:
+        # Only triangulate points which were inliers for the fundamental matrix
+        inlier_pts_L = []; inlier_pts_R = []
+        for i in range(len(fmap)):
+            if fmap[i]:
+                inlier_pts_L.append(ptsL[i,:])
+                inlier_pts_R.append(ptsR[i,:])
+        
+        triang_pts_L = np.array(inlier_pts_L)
+        triang_pts_R = np.array(inlier_pts_R)
+    else:
+        triang_pts_L = ptsL
+        triang_pts_R = ptsR
+
+    pts4D = cv2.triangulatePoints(r_L, r_R, triang_pts_L.T, triang_pts_R.T).T
+
+    if verbose:
+        # Print out how many points were triangulated
+        print("{} points triangulated".format(pts4D.shape[0]))
+
+    # Return the list of 4D (homogeneous) points
+    return pts4D
+
+#TODO: if the above function only finds relative/local 3D position, this function is needed
+# def adjust_feature_points():
+#     """
+
+#     """
+#     pass
+
+def plot_point_cloud(pts4D, pts4D_indices=[], method='open3d', verbose=False):
+    """Create a point cloud of all 3D points found so far
+
+    :param pts4D: a list of 4D (homogeneous) points to be plotted
+    :param pts4D_indices: a list of indices, separating the pts4D
+        into one set for each pair of images processed. If this
+        is the empty list, all points are plotted with the same
+        colour.
+    :param method: the method used to plot the points,
+        either 'open3d' or 'matplotlib'
+    :param verbose: as in pipeline()
+    """
+    # convert from homogeneous coordinates to 3D
+    pts3D = pts4D[:, :3]/np.repeat(pts4D[:, 3], 3).reshape(-1, 3)
+    # print(len(pts3D))
+    # pts3D = np.array([point for point in pts3D if point[0] < 20 and point[1] < 20 and point[2] < 20])
+    # print("Post processing:", len(pts3D))
+
+    # print(pts3D.shape)
+    # # Test the resulting Z coordinates
+    # test_x = sorted(pts3D[:][0])
+    # test_y = sorted(pts3D[:][1])
+    # test_z = sorted(pts3D[:][2])
+
+    # print("Lowest X:", test_x[0])
+    # print("Second highest X:", test_x[-2])
+    # print("Highest X:", test_x[-1])
+    # print("Lowest Y:", test_y[0])
+    # print("Second highest Y:", test_y[-2])
+    # print("Highest Y:", test_y[-1])
+    # print("Lowest Z:", test_z[0])
+    # print("Second highest Z:", test_z[-2])
+    # print("Highest z:", test_z[-1])
+
+    colours = [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+        [1, 1, 0],
+        [1, 0, 1],
+        [0, 1, 1],
+        [1, 0.5, 0],
+        [1, 0, 0.5],
+        [0.5, 1, 0],
+        [0.5, 0, 1],
+        [0, 1, 0.5],
+        [0, 0.5, 1],
+        [1, 0.5, 0.5],
+        [0.5, 1, 0.5],
+        [0.5, 0.5, 1],
+        [0, 0, 0]
+    ]
+
+    if(method == 'open3d'):
+        # Plot with open3d
+        plot_list = []
+        if len(pts4D_indices) == 0:
+            # Plot all points red
+            pcd = open3d.PointCloud()
+            pcd.points = open3d.Vector3dVector(pts3D)
+            pcd.paint_uniform_color([1, 0, 0])
+            plot_list.append(pcd)
+        else:
+            # Plot each set of points (for each image pair) a different colour
+            for index in range(1, len(pts4D_indices)):
+                start = pts4D_indices[index - 1]
+                end = pts4D_indices[index]
+                pcd = open3d.PointCloud()
+                pcd.points = open3d.Vector3dVector(pts3D[start:end])
+                pcd.paint_uniform_color(colours[(index-1) % len(colours)])
+                plot_list.append(pcd)
+
+        # Create a set of axes centered at the origin
+        axes = open3d.create_mesh_coordinate_frame(size = 3, origin = [0, 0, 0])
+        plot_list.append(axes)
+
+        # Draw the point cloud
+        open3d.draw_geometries(plot_list)
+
+    elif(method == 'matplotlib'):
+        # Plot with matplotlib
+        Xs = pts3D[:, 0] #Ys
+        Ys = pts3D[:, 1] #Zs
+        Zs = pts3D[:, 2] #Xs
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        ax.scatter(Xs, Ys, Zs, c='r', marker='o')
+        ax.set_xlabel('X') #Z
+        ax.set_ylabel('Y') #X
+        ax.set_zlabel('Z') #Y
+        plt.title('3D point cloud: Use pan axes button below to inspect')
+        plt.show()
+
+#TODO
+def apply_bundle_adjustment():
+    """Apply bundle adjustment
+
+    This improves the resultant 3D points through bundle adjustment.
+
+    :param pts3D: the 3D points to be adjusted
+    :param verbose: as in pipeline()
+    """
+    pass
+
+def downsize_img(img, wmax=1600, hmax=900):
+    """ Downsize the given image
+
+    Reduce the size of the input image to make it suitable for output.
+    The aspect ratio of the image is not changed.
+
+    :param img: the image to downsize
+    :param wmax: the maximum acceptable width
+    :param hmax: the maximum acceptable height
+    """
+    # Downsize img until its width is less than wmax and height is less than hmax
+    while img.shape[1] > wmax or img.shape[0] > hmax:
+        img = cv2.resize(img, None, fx=0.75, fy=0.75)
+    return img
