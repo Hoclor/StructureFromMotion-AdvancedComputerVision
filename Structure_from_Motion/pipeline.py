@@ -326,7 +326,7 @@ def _get_relative_rotation_translation_OLD(ematrix, k, pts1, pts2, verbose=False
                 # It must now be W = W.T and t = t
                 t = np.negative(t)
     
-    #FIXME TODO HACK
+    #HACK
     # Check if the diagonal of R is all negative values. If so, negate R
     if R[0, 0] < 0 and R[1, 1] < 0 and R[2, 2] < 0:
         R = np.negative(R)
