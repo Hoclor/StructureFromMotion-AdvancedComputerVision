@@ -34,10 +34,11 @@ def pipeline(path_to_dataset, k, verbose=False):
     # Extract feature points from this image
     pts2, desc2 = get_feature_points(img2, verbose)
 
+    # Initialize some variables used for the entire sequence
+    rtmatrix1 = np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], dtype=np.float64).reshape(3, 4) # The global [R|t] matrix for image 1
+    global_Rt_list = rtmatrix1.reshape(1, 3, 4) # List of the global [R|t] matrices for each image
+    all_pts4D = None # List of all 4D points, to be plotted at the end
     # Loop over all the other images
-    global_Rt_list = []
-    rtmatrix1 = np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0]).reshape(3, 4)
-    global_Rt_list.append(rtmatrix1)
     for count in range(1, img_loader.count):
         # Move the last image (img2) into img1, and its points into pts1
         img1 = img2
@@ -279,7 +280,33 @@ def get_relative_rotation_translation(ematrix, k, pts1, pts2, verbose=False):
     # Check if this [R|t] matrix actually makes sense, i.e. the 3D points produced are in front of the camera
     # This must be done as there are four possible [R|t] matrices, but only one makes sense in practice
     # The four possibilities are constructed through setting W = W.T and/or t = -t in the computation above
-    #TODO
+
+    # Convert the input pts1 and pts2 to homogeneous coordinates
+    pts1_h = []
+    print("k:", k.shape)
+    for point in pts1:
+        pts1_h.append(np.linalg.inv(k).dot([point[0], point[1], 1.0]))
+    pts2_h = []
+    for point in pts2:
+        pts2_h.append(np.linalg.inv(k).dot([point[0], point[1], 1.0]))
+    if not _in_front_of_both_cameras(pts1_h, pts2_h, R, t):
+        # Try t = -t
+        t = np.negative(t)
+
+        # Check again
+        if not _in_front_of_both_cameras(pts1_h, pts2_h, R, t):
+            # Try W = W.T and t = -t
+            R = np.matmul(np.matmul(U, W), V.T)
+            
+            # Check again
+            if not _in_front_of_both_cameras(pts1_h, pts2_h, R, t):
+                # It must now be W = W.T and t = t
+                t = np.negative(t)
+    
+    #FIXME TODO HACK
+    # Check if the diagonal of R is all negative values. If so, negate R
+    if R[0, 0] < 0 and R[1, 1] < 0 and R[2, 2] < 0:
+        R = np.negative(R)
 
     # Construct [R|t] matrix
     Rt = np.hstack((R, t))
@@ -390,7 +417,7 @@ def plot_point_cloud(pts4D, method='open3d', verbose=False):
 
     if(method == 'open3d'):
         # Plot with open3d
-    pcd = open3d.PointCloud()
+        pcd = open3d.PointCloud()
         pcd.points = open3d.Vector3dVector(pts3D[:2562])
         pcd.paint_uniform_color([1, 0, 0])
         pcd2 = open3d.PointCloud()
@@ -400,9 +427,9 @@ def plot_point_cloud(pts4D, method='open3d', verbose=False):
         pcd3.points = open3d.Vector3dVector(pts3D[5067:])
         pcd3.paint_uniform_color([0, 1, 0])
 
-    axes = open3d.create_mesh_coordinate_frame(size = 3, origin = [0, 0, 0])
+        axes = open3d.create_mesh_coordinate_frame(size = 3, origin = [0, 0, 0])
         open3d.draw_geometries([pcd, pcd2, pcd3, axes])
-    
+
     elif(method == 'matplotlib'):
         # Plot with matplotlib
         Xs = pts3D[:, 0] #Ys
