@@ -41,6 +41,7 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
     rtmatrix1 = np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], dtype=np.float64).reshape(3, 4) # The global [R|t] matrix for image 1
     global_Rt_list = rtmatrix1.reshape(1, 3, 4) # List of the global [R|t] matrices for each image
     all_pts4D = None # List of all 4D points, to be plotted at the end
+    pts4D_indices = [0]
     # Loop over all the other images
     for count in range(1, img_loader.count):
         # Move the last image (img2) into img1, and its points into pts1
@@ -77,6 +78,7 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
 
         # Add the list of 4D pts to the list of all 4D pts
         if type(all_pts4D) != type(None):
+            pts4D_indices.append(len(all_pts4D))
             all_pts4D = np.concatenate((all_pts4D, pts4D))
         else:
             all_pts4D = pts4D
@@ -85,7 +87,7 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         
         # Plot the 3D points
         if count >= 5:
-            plot_point_cloud(all_pts4D, 'open3d', verbose=verbose)
+            plot_point_cloud(all_pts4D, pts4D_indices=pts4D_indices, method='open3d', verbose=verbose)
             return
 
         # Stop after the first two images, for testing
@@ -436,10 +438,14 @@ def triangulate_feature_points(global_Rt_list, pts1, pts2, k, verbose=False):
 #     """
 #     pass
 
-def plot_point_cloud(pts4D, method='open3d', verbose=False):
+def plot_point_cloud(pts4D, pts4D_indices=[], method='open3d', verbose=False):
     """Create a point cloud of all 3D points found so far
 
-    :param pts4D: a list of 3D points to be plotted
+    :param pts4D: a list of 4D (homogeneous) points to be plotted
+    :param pts4D_indices: a list of indices, separating the pts4D
+        into one set for each pair of images processed. If this
+        is the empty list, all points are plotted with the same
+        colour.
     :param method: the method used to plot the points,
         either 'open3d' or 'matplotlib'
     :param verbose: as in pipeline()
@@ -466,20 +472,51 @@ def plot_point_cloud(pts4D, method='open3d', verbose=False):
     # print("Second highest Z:", test_z[-2])
     # print("Highest z:", test_z[-1])
 
+    colours = [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+        [0, 1, 1],
+        [1, 0, 1],
+        [1, 1, 0],
+        [1, 0.5, 0],
+        [1, 0, 0.5],
+        [0.5, 1, 0],
+        [0.5, 0, 1],
+        [0, 1, 0.5],
+        [0, 0.5, 1]
+        [1, 0.5, 0.5],
+        [0.5, 1, 0.5],
+        [0.5, 0.5, 1]
+        [0, 0, 0],
+        [1, 1, 1],
+    ]
+
     if(method == 'open3d'):
         # Plot with open3d
+        plot_list = []
+        if len(pts4D_indices) == 0:
+            # Plot all points red
         pcd = open3d.PointCloud()
-        pcd.points = open3d.Vector3dVector(pts3D[:2562])
+            pcd.points = open3d.Vector3dVector(pts3D)
         pcd.paint_uniform_color([1, 0, 0])
-        pcd2 = open3d.PointCloud()
-        pcd2.points = open3d.Vector3dVector(pts3D[2562:5067])
-        pcd2.paint_uniform_color([0, 0, 1])
-        pcd3 = open3d.PointCloud()
-        pcd3.points = open3d.Vector3dVector(pts3D[5067:])
-        pcd3.paint_uniform_color([0, 1, 0])
+            plot_list.append(pcd)
+        else:
+            # Plot each set of points (for each image pair) a different colour
+            for index in range(1, len(pts4D_indices)):
+                start = pts4D_indices[index - 1]
+                end = pts4D_indices[index]
+                pcd = open3d.PointCloud()
+                pcd.points = open3d.Vector3dVector(pts3D[start:end])
+                pcd.paint_uniform_color(colours[(index-1) % len(colours)])
+                plot_list.append(pcd)
 
+        # Create a set of axes centered at the origin
         axes = open3d.create_mesh_coordinate_frame(size = 3, origin = [0, 0, 0])
-        open3d.draw_geometries([pcd, pcd2, pcd3, axes])
+        plot_list.append(axes)
+
+        # Draw the point cloud
+        open3d.draw_geometries(plot_list)
 
     elif(method == 'matplotlib'):
         # Plot with matplotlib
