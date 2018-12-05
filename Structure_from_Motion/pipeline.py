@@ -86,7 +86,7 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         # plot_point_cloud(pts4D, verbose=verbose)
         
         # Stop early for testing purposes
-        if count >= 5:
+        if count >= 200:
             break
 
     # Plot the 3D points
