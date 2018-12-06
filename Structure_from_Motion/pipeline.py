@@ -93,12 +93,12 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
                 rt_matrix_R = get_relative_rotation_translation(ematrix, k, imgL_matches, imgR_matches, fmap=fmap, verbose=verbose)
 
                 # Compare this relative [R|t] matrix with the last one
-                acceptable_z = check_rt_matrix(rt_matrix_R, verbose=verbose)
+                acceptable_z = check_rt_matrix(rt_matrix_R, fmap, verbose=verbose)
             
             current_trial += 1
             if verbose and current_trial < TRIALS and not acceptable_z:
                 print("Starting trial {}, cap: {}".format(current_trial + 1, TRIALS))
-        
+
         if not acceptable_z:
             # Skip this image
             print("Image skipped after {} trials".format(TRIALS))
@@ -125,7 +125,7 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         if verbose_img:
             # Plot the point cloud of points from this image match
             plot_point_cloud(pts4D, verbose=verbose)
-        
+
     # Plot the 3D points
     plot_point_cloud(all_pts4D, pts4D_indices=[], verbose=verbose)
 
@@ -325,18 +325,21 @@ def get_relative_rotation_translation(ematrix, k, ptsL, ptsR, fmap=None, verbose
     # Return the [R|t] matrix
     return rt_matrix
 
-def check_rt_matrix(current_rt_matrix, verbose=False):
+def check_rt_matrix(current_rt_matrix, fmap, verbose=False):
     """Check if the current [R|t] matrix is acceptable_z
     :param current_rt_matrix: the [R|t] matrix to be checked
+    :param fmap: the fmap mapping inliers from [R|t] creation
     :param verbose: as in pipeline()
     """
     # Since the camera is mounted on a car, looking at 90' right or 90' left, there should be VERY little z translation
     # Thus, only allow -0.05 < z < 0.05 - even when the car is turning, this should work as the relative z translation
     #   from frame-to-frame will be very small
+
+    # Also require that at least 100 points were inliers from the [R|t] creation, i.e. are in view of the camera
     current_z_translation = current_rt_matrix[2, 3]
-    if current_z_translation < -0.05 or current_z_translation > 0.05:
-        return False
-    return True
+    if abs(current_z_translation) < 0.05 and sum(fmap) > 50:
+        return True
+    return False
 
 def get_global_rotation_translation(global_rt_matrix_L, rt_matrix_R, verbose=False):
     """Compute the [R|t] matrix for imgR/camR from the first img/cam
