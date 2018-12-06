@@ -51,12 +51,16 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
 
         # Load the next image into imgR
         imgR = img_loader.next()
+        # Check that the image was loaded correctly. If not, it will be False
+        if type(imgR) == bool:
+            # This means there are no more images to load, so break out of the loop and plot the points
+            break
 
         # Extract feature points of the second image
-        ptsR, descR = get_feature_points(imgR, verbose_img=verbose_img)
+        ptsR, descR = get_feature_points(imgR, verbose=verbose, verbose_img=verbose_img)
 
         # Find the feature point matches between imgL and imgR
-        matches, imgL_matches, imgR_matches = match_feature_points(imgL, ptsL, descL, imgR, ptsR, descR, verbose_img=verbose_img)
+        matches, imgL_matches, imgR_matches = match_feature_points(imgL, ptsL, descL, imgR, ptsR, descR, verbose=verbose, verbose_img=verbose_img)
 
         # Estimate the fundamental matrix
         fmatrix, fmap = get_fundamental_matrix(imgL_matches, imgR_matches, verbose=verbose)
@@ -224,7 +228,7 @@ def get_fundamental_matrix(matched_ptsL, matched_ptsR, verbose=False):
     :param matched_ptsR: the feature points in the second image
     :param verbose: as in pipeline()
     """
-    fmatrix, fmap = cv2.findFundamentalMat(matched_ptsL, matched_ptsR, cv2.FM_RANSAC, 0.1, 0.999) #HYPERPARAM - 0.1, 0.999
+    fmatrix, fmap = cv2.findFundamentalMat(matched_ptsL, matched_ptsR, cv2.FM_RANSAC, 0.1, 0.99) #HYPERPARAM - 0.1, 0.999
     if verbose:
         # Print the fundamental matrix
         print("Fundamental matrix:")
@@ -245,7 +249,7 @@ def get_essential_matrix(fmatrix, k, verbose=False):
     :param verbose: as in pipeline()
     """
     # Essential matrix is calculated as E=K_1.T * F * K_2
-    # Since the same camera is used for the entire video sequence, K_1 == K_2 == k
+    # Since the same camera is used for the entire video sequence, K_1 = K_2 = k
     ematrix = np.matmul(np.matmul(np.transpose(k), fmatrix), k)
     if verbose:
         # print the essential matrix
@@ -373,6 +377,7 @@ def get_relative_rotation_translation(ematrix, k, ptsL, ptsR, fmap=None, verbose
     """    
     # Use recoverPose to compute the R and t matrices
     points, R, t, mask = cv2.recoverPose(ematrix, ptsL, ptsR, k, mask=fmap)
+    #TODO: try to fix plot being upside down - can probably he HACK'ed here
     
     # Create the [R|t] matrix by stacking R and t horizontally
     rt_matrix = np.hstack((R, t))
@@ -401,7 +406,6 @@ def get_global_rotation_translation(global_rt_matrix_L, rt_matrix_R, verbose=Fal
     r_mat_R = rt_matrix_R[:, :3]
     t_R = rt_matrix_R[:, 3]
     
-
     # Convert the rotation matrices to rotation vectors
     r_vec_L, _ = cv2.Rodrigues(r_mat_L)
     r_vec_R, _ = cv2.Rodrigues(r_mat_R)
@@ -431,6 +435,7 @@ def triangulate_feature_points(global_Rt_list, ptsL, ptsR, k, fmap=[], verbose=F
         images processed so far, in order
     :param ptsL: the matched points in the left image
     :param ptsR: the matched points in the right image
+    :param k: the camera intrinsics matrix
     :param fmap: a binary list mapping which matched points are inliers for
         the fundamental matrix
     :param verbose: as in pipeline()
@@ -565,6 +570,10 @@ def plot_point_cloud(pts4D, pts4D_indices=[], method='open3d', verbose=False):
         ax.set_zlabel('Z') #Y
         plt.title('3D point cloud: Use pan axes button below to inspect')
         plt.show()
+
+    if verbose:
+        # Print the number of 3D points plotted
+        print("Plotted {} 3D points".format(len(pts3D)))
 
 #TODO
 def apply_bundle_adjustment():
