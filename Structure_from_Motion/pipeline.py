@@ -31,7 +31,6 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
     img_loader = Image_loader(path_to_dataset, verbose)
 
     # Skip to a specific image
-    img_loader.reset(6)
 
     # Set the start index, for printing purposes only
     start_index = img_loader.index
@@ -116,16 +115,19 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         # Triangulate the matched feature points
         pts4D = triangulate_feature_points(global_rt_list, imgL_matches, imgR_matches, k, fmap=fmap, verbose=verbose)
 
+        # Add the list of 4D pts to the list of all 4D pts
+        if type(all_pts4D) != type(None):
+            pts4D_indices.append(len(all_pts4D))
+            all_pts4D = np.concatenate((all_pts4D, pts4D))
+        else:
+            all_pts4D = pts4D
+
         if verbose_img:
             # Plot the point cloud of points from this image match
-            plot_point_cloud(pts4D, global_rt_matrix_R.reshape(1, 3, 4), verbose=verbose)
+            plot_point_cloud(pts4D, verbose=verbose)
         
-        # Stop early for testing purposes
-        if count >= 10:
-            break
-
     # Plot the 3D points
-    plot_point_cloud(all_pts4D, global_rt_list, pts4D_indices=pts4D_indices, verbose=verbose)
+    plot_point_cloud(all_pts4D, pts4D_indices=[], verbose=verbose)
 
 
 class Image_loader:
@@ -310,7 +312,6 @@ def get_relative_rotation_translation(ematrix, k, ptsL, ptsR, fmap=None, verbose
     """
     # Use recoverPose to compute the R and t matrices
     points, R, t, mask = cv2.recoverPose(ematrix, ptsL, ptsR, k, mask=fmap)
-    #TODO: try to fix plot being upside down - can probably he HACK'ed here
     
     # Create the [R|t] matrix by stacking R and t horizontally
     rt_matrix = np.hstack((R, t))
@@ -417,12 +418,10 @@ def triangulate_feature_points(global_rt_list, ptsL, ptsR, k, fmap=[], verbose=F
     # Return the list of 4D (homogeneous) points
     return pts4D
 
-def plot_point_cloud(pts4D, global_rt_list, pts4D_indices=[], verbose=False):
+def plot_point_cloud(pts4D, pts4D_indices=[], verbose=False):
     """Create a point cloud of all 3D points found so far
 
     :param pts4D: a list of 4D (homogeneous) points to be plotted
-    :param global_rt_list: a list of the global [R|t] matrices, from
-        which the camera position for each image can be reconstructed
     :param pts4D_indices: a list of indices, separating the pts4D
         into one set for each pair of images processed. If this
         is the empty list, all points are plotted with the same
