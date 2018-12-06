@@ -83,14 +83,18 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
             # Estimate the fundamental matrix
             fmatrix, fmap = get_fundamental_matrix(imgL_matches, imgR_matches, verbose=verbose)
 
-            # Calculate the essential matrix
-            ematrix = get_essential_matrix(fmatrix, k, verbose=verbose)
+            # If no fmatrix was found, skip the following
+            if fmatrix != None:
 
-            # Get the relative [R|t] matrix
-            rt_matrix_R = get_relative_rotation_translation(ematrix, k, imgL_matches, imgR_matches, fmap=fmap, verbose=verbose)
+                # Calculate the essential matrix
+                ematrix = get_essential_matrix(fmatrix, k, verbose=verbose)
 
-            # Compare this relative [R|t] matrix with the last one
-            acceptable = check_rt_matrix(rt_matrix_R, verbose=verbose)
+                # Get the relative [R|t] matrix
+                rt_matrix_R = get_relative_rotation_translation(ematrix, k, imgL_matches, imgR_matches, fmap=fmap, verbose=verbose)
+
+                # Compare this relative [R|t] matrix with the last one
+                acceptable = check_rt_matrix(rt_matrix_R, verbose=verbose)
+            
             current_trial += 1
             if verbose and current_trial < TRIALS and not acceptable:
                 print("Starting trial {}, cap: {}".format(current_trial + 1, TRIALS))
