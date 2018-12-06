@@ -30,8 +30,12 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
     """
     # Create the image loader
     img_loader = Image_loader(path_to_dataset, verbose)
+    # Skip to a specific image
+    img_loader.reset(90)
+    # Set the start index, for printing purposes only
+    start_index = img_loader.index
     # load the first image into imgR (i.e. pretend we just processed this image in a previous pair)
-    print('Processing image 1 out of {}'.format(img_loader.count))
+    print('Processing image {:3} out of {}'.format(start_index+1, img_loader.count))
     imgR = img_loader.next()
 
     # Extract feature points from this image
@@ -44,7 +48,8 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
     pts4D_indices = [0]
     # Loop over all the other images
     for count in range(1, img_loader.count):
-        print('Processing image {} out of {}'.format(count+1, img_loader.count))
+        if count+start_index+1 <= img_loader.count:
+            print('Processing image {:3} out of {}'.format(count+start_index+1, img_loader.count))
         # Move the last image (imgR) into imgL, and its points into ptsL
         imgL = imgR
         ptsL, descL = ptsR, descR
@@ -72,13 +77,13 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         rt_matrix_R = get_relative_rotation_translation(ematrix, k, imgL_matches, imgR_matches, fmap=fmap, verbose=verbose)
 
         # Convert the relative rtmatrix above into a global rtmatrix
-        global_rt_matrix_R = get_global_rotation_translation(global_Rt_list[-1, :, :], rt_matrix_R, verbose=verbose)
+        global_rt_matrix_R = get_global_rotation_translation(global_rt_list[-1, :, :], rt_matrix_R, verbose=verbose)
 
         # Add the new global [R|t] matrix to the list
-        global_Rt_list = np.concatenate((global_Rt_list, global_rt_matrix_R.reshape(1, 3, 4)))
+        global_rt_list = np.concatenate((global_rt_list, global_rt_matrix_R.reshape(1, 3, 4)))
 
         # Triangulate the matched feature points
-        pts4D = triangulate_feature_points(global_Rt_list, imgL_matches, imgR_matches, k, fmap=fmap, verbose=verbose)
+        pts4D = triangulate_feature_points(global_rt_list, imgL_matches, imgR_matches, k, fmap=fmap, verbose=verbose)
 
         # Add the list of 4D pts to the list of all 4D pts
         if type(all_pts4D) != type(None):
@@ -92,11 +97,11 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
             plot_point_cloud(pts4D, global_rt_matrix_R.reshape(1, 3, 4), verbose=verbose)
         
         # Stop early for testing purposes
-        if count >= 200:
+        if count >= 10:
             break
 
     # Plot the 3D points
-    plot_point_cloud(all_pts4D, pts4D_indices=pts4D_indices, method='open3d', verbose=verbose)
+    plot_point_cloud(all_pts4D, global_rt_list, pts4D_indices=pts4D_indices, method='open3d', verbose=verbose)
 
 
 class Image_loader:
@@ -405,7 +410,7 @@ def get_global_rotation_translation(global_rt_matrix_L, rt_matrix_R, verbose=Fal
     t_L = global_rt_matrix_L[:, 3]
     r_mat_R = rt_matrix_R[:, :3]
     t_R = rt_matrix_R[:, 3]
-    
+
     # Convert the rotation matrices to rotation vectors
     r_vec_L, _ = cv2.Rodrigues(r_mat_L)
     r_vec_R, _ = cv2.Rodrigues(r_mat_R)
@@ -428,10 +433,10 @@ def get_global_rotation_translation(global_rt_matrix_L, rt_matrix_R, verbose=Fal
     # Return the global_rt_R
     return global_rt_R
 
-def triangulate_feature_points(global_Rt_list, ptsL, ptsR, k, fmap=[], verbose=False):
+def triangulate_feature_points(global_rt_list, ptsL, ptsR, k, fmap=[], verbose=False):
     """Get 4D (homogeneous) points through triangulation
 
-    :param global_Rt_list: A list of all the global [R|t] matrices for all
+    :param global_rt_list: A list of all the global [R|t] matrices for all
         images processed so far, in order
     :param ptsL: the matched points in the left image
     :param ptsR: the matched points in the right image
@@ -441,9 +446,14 @@ def triangulate_feature_points(global_Rt_list, ptsL, ptsR, k, fmap=[], verbose=F
     :param verbose: as in pipeline()
     """
     # triangulate points
-    r_L = global_Rt_list[-2, :, :]
+    # Multiply [R|t] by k to yield the camera perspective matrix
+    r_L = global_rt_list[-2, :, :]
+    with np.printoptions(suppress=True):
+        print("R_L normalized:\n", r_L)
     r_L = np.matmul(k, r_L)
-    r_R = global_Rt_list[-1, :, :]
+    with np.printoptions(suppress=True):
+        print("R_L non-normalized:\n", r_L)
+    r_R = global_rt_list[-1, :, :]
     r_R = np.matmul(k, r_R)
 
     # If fmap was provided, filter out non-inliers
@@ -477,10 +487,12 @@ def triangulate_feature_points(global_Rt_list, ptsL, ptsR, k, fmap=[], verbose=F
 #     """
 #     pass
 
-def plot_point_cloud(pts4D, pts4D_indices=[], method='open3d', verbose=False):
+def plot_point_cloud(pts4D, global_rt_list, pts4D_indices=[], method='open3d', verbose=False):
     """Create a point cloud of all 3D points found so far
 
     :param pts4D: a list of 4D (homogeneous) points to be plotted
+    :param global_rt_list: a list of the global [R|t] matrices, from
+        which the camera position for each image can be reconstructed
     :param pts4D_indices: a list of indices, separating the pts4D
         into one set for each pair of images processed. If this
         is the empty list, all points are plotted with the same
@@ -548,11 +560,30 @@ def plot_point_cloud(pts4D, pts4D_indices=[], method='open3d', verbose=False):
                 pcd.points = open3d.Vector3dVector(pts3D[start:end])
                 pcd.paint_uniform_color(colours[(index-1) % len(colours)])
                 plot_list.append(pcd)
+            print("Plotted {} sets of 3D points".format(len(pts4D_indices) - 1))
+        
+        #TODO: fix this or remove it, currently not working perfectly and is not a priority
+        # Plot a cone at each camera position
+        # for index, rt_matrix in enumerate(global_rt_list):
+        #     # Create a small cone
+        #     cam_cone = open3d.create_mesh_cone(radius=0.5, height=1.0)
+        #     # Set the cone's colour to red
+        #     cam_cone.paint_uniform_color(colours[(index) % len(colours)])
+        #     # First flip the cone along the z axis
+        #     cam_cone.transform(np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1]).reshape(4, 4))
+        #     # Now transform the cone according to the (homogenized) [R|t] matrix
+        #     # cam_cone.transform(np.vstack((rt_matrix.itemset(4, -rt_matrix.item(4)), np.array([0, 0, 0, 1])))) TODO
+        #     # rt_temp = np.copy(rt_matrix) #TODO FIXME
+        #     # rt_temp[0, 3] = -rt_temp[0, 3]
+        #     # rt_temp[1, 3] = -rt_temp[1, 3]
 
-        # Create a set of axes centered at the origin
-        axes = open3d.create_mesh_coordinate_frame(size = 3, origin = [0, 0, 0])
-        plot_list.append(axes)
+        #     # cam_cone.transform(np.vstack((rt_temp, np.array([0, 0, 0, 1]))))
+        #     # Alternative camera center computation
+            
 
+        #     # Add the cone to the list of things to plot
+        #     plot_list.append(cam_cone)
+        
         # Draw the point cloud
         open3d.draw_geometries(plot_list)
 
@@ -570,7 +601,7 @@ def plot_point_cloud(pts4D, pts4D_indices=[], method='open3d', verbose=False):
         ax.set_zlabel('Z') #Y
         plt.title('3D point cloud: Use pan axes button below to inspect')
         plt.show()
-
+    
     if verbose:
         # Print the number of 3D points plotted
         print("Plotted {} 3D points".format(len(pts3D)))
