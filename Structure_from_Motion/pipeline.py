@@ -35,11 +35,11 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
     imgR = img_loader.next()
 
     # Extract feature points from this image
-    ptsR, descR = get_feature_points(imgR, verbose_img=verbose_img)
+    ptsR, descR = get_feature_points(imgR, verbose=verbose, verbose_img=verbose_img)
 
     # Initialize some variables used for the entire sequence
     rtmatrix1 = np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], dtype=np.float64).reshape(3, 4) # The global [R|t] matrix for image 1
-    global_Rt_list = rtmatrix1.reshape(1, 3, 4) # List of the global [R|t] matrices for each image
+    global_rt_list = rtmatrix1.reshape(1, 3, 4) # List of the global [R|t] matrices for each image
     all_pts4D = None # List of all 4D points, to be plotted at the end
     pts4D_indices = [0]
     # Loop over all the other images
@@ -83,7 +83,9 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         else:
             all_pts4D = pts4D
 
-        # plot_point_cloud(pts4D, verbose=verbose)
+        if verbose_img:
+            # Plot the point cloud of points from this image match
+            plot_point_cloud(pts4D, global_rt_matrix_R.reshape(1, 3, 4), verbose=verbose)
         
         # Stop early for testing purposes
         if count >= 200:
@@ -115,6 +117,9 @@ class Image_loader:
 
         The images are loaded in alphabetical order, one at a time.
         """
+        # Check if the index is out of range
+        if self.index >= self.count:
+            return False
         img = cv2.imread(self.path + self.images[self.index])
         self.index += 1
         return img
@@ -134,9 +139,9 @@ class Image_loader:
 
         :param new_index: The index to reset to. Default 0.
         """
-        index = new_index
+        self.index = new_index
 
-def get_feature_points(img, verbose_img=False, image_name='Img'):
+def get_feature_points(img, verbose=False, verbose_img=False, image_name='Img'):
     """Extract feature points
 
     Extracts SURF feature points from the given image.
@@ -150,6 +155,10 @@ def get_feature_points(img, verbose_img=False, image_name='Img'):
     # Find the keypoints and descriptors in the image
     kp, desc = detector.detectAndCompute(img, None)
 
+    if verbose:
+        # Print the number of features found
+        print("{} features detected".format(len(kp)))
+
     if verbose_img:
         # Display the image with its feature points
         disp_img = np.zeros_like(img)
@@ -162,7 +171,7 @@ def get_feature_points(img, verbose_img=False, image_name='Img'):
     # Return the keypoints and descriptors
     return kp, desc
 
-def match_feature_points(imgL, ptsL, descL, imgR, ptsR, descR, verbose_img=False, image_name='Feature point matches'):
+def match_feature_points(imgL, ptsL, descL, imgR, ptsR, descR, verbose=False, verbose_img=False, image_name='Feature point matches'):
     """Match feature points in the two images
 
     This should only be called on consecutive images, or correct
@@ -182,8 +191,13 @@ def match_feature_points(imgL, ptsL, descL, imgR, ptsR, descR, verbose_img=False
     matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck=False)
     # Find the top 2 matches for each feature point
     matches = matcher.knnMatch(descL, descR, k=2)
+    pre_filtering_matches = len(matches)
     # Apply the ratio test: x is best match, y is second best match, lower distance is better
     matches = [x for x, y in matches if x.distance < 0.5*y.distance] #HYPERPARAM - 0.5*distance
+
+    if verbose:
+        # Print the number of feature point matches found (before and after filtering)
+        print("Feature matches before ratio test: {}\nFeature matches after ratio test: {}".format(pre_filtering_matches, len(matches)))
 
     if verbose_img:
         # Display the feature point matches between the two images
