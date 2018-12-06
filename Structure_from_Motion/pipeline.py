@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 import sys
 import os
+import random
 
 import open3d
 
@@ -28,8 +29,10 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
     """
     # Create the image loader
     img_loader = Image_loader(path_to_dataset, verbose)
+
     # Skip to a specific image
-    img_loader.reset(90)
+    img_loader.reset(6)
+
     # Set the start index, for printing purposes only
     start_index = img_loader.index
     # load the first image into imgR (i.e. pretend we just processed this image in a previous pair)
@@ -44,18 +47,21 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
     global_rt_list = rtmatrix1.reshape(1, 3, 4) # List of the global [R|t] matrices for each image
     all_pts4D = None # List of all 4D points, to be plotted at the end
     pts4D_indices = [0]
+    acceptable = True
     # Loop over all the other images
     for count in range(1, img_loader.count):
         if count+start_index+1 <= img_loader.count:
             print('Processing image {:3} out of {}'.format(count+start_index+1, img_loader.count))
         # Move the last image (imgR) into imgL, and its points into ptsL
+        # Only do this if the last image wasn't skipped - if it was, disregard it and match to the 2nd last image instead
+        if acceptable:
         imgL = imgR
         ptsL, descL = ptsR, descR
 
         # Load the next image into imgR
         imgR = img_loader.next()
         # Check that the image was loaded correctly. If not, it will be False
-        if type(imgR) == bool:
+        if type(imgR) == bool and imgR == False:
             # This means there are no more images to load, so break out of the loop and plot the points
             break
 
@@ -65,6 +71,15 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         # Find the feature point matches between imgL and imgR
         matches, imgL_matches, imgR_matches = match_feature_points(imgL, ptsL, descL, imgR, ptsR, descR, verbose=verbose, verbose_img=verbose_img)
 
+        # Repeat the below section of the pipeline until an acceptable [R|t] matrix is found. If none is found after TRIALS
+        # tries, skip this image
+        acceptable = False
+        TRIALS = 30
+        current_trial = 0
+        while not acceptable:
+            if current_trial >= TRIALS:
+                # Skip this image
+                break
         # Estimate the fundamental matrix
         fmatrix, fmap = get_fundamental_matrix(imgL_matches, imgR_matches, verbose=verbose)
 
@@ -73,6 +88,19 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
 
         # Get the relative [R|t] matrix
         rt_matrix_R = get_relative_rotation_translation(ematrix, k, imgL_matches, imgR_matches, fmap=fmap, verbose=verbose)
+
+            # Compare this relative [R|t] matrix with the last one
+            acceptable = check_rt_matrix(rt_matrix_R, verbose=verbose)
+            current_trial += 1
+            if verbose and current_trial < TRIALS and not acceptable:
+                print("Starting trial {}, cap: {}".format(current_trial + 1, TRIALS))
+        
+        if not acceptable:
+            # Skip this image
+            print("Image skipped after {} trials".format(TRIALS))
+            continue
+        
+        print('Trials required: {}'.format(current_trial))
 
         # Convert the relative rtmatrix above into a global rtmatrix
         global_rt_matrix_R = get_global_rotation_translation(global_rt_list[-1, :, :], rt_matrix_R, verbose=verbose)
@@ -157,8 +185,8 @@ def get_feature_points(img, verbose=False, verbose_img=False, image_name='Img'):
     :param verbose_img: as in pipeline()
     :param image_name: the name of the image to be displayed
     """
-    # Create the SURF feature detector
-    detector = cv2.xfeatures2d.SURF_create(350) #HYPERPARAM - 350, 750
+    # Create the SURF feature detector - higher value = fewer points
+    detector = cv2.xfeatures2d.SURF_create(750) #HYPERPARAM - 350, 750
     # Find the keypoints and descriptors in the image
     kp, desc = detector.detectAndCompute(img, None)
 
@@ -200,7 +228,7 @@ def match_feature_points(imgL, ptsL, descL, imgR, ptsR, descR, verbose=False, ve
     matches = matcher.knnMatch(descL, descR, k=2)
     pre_filtering_matches = len(matches)
     # Apply the ratio test: x is best match, y is second best match, lower distance is better
-    matches = [x for x, y in matches if x.distance < 0.5*y.distance] #HYPERPARAM - 0.5*distance
+    matches = [x for x, y in matches if x.distance < 0.7*y.distance] #HYPERPARAM - 0.5*distance
 
     if verbose:
         # Print the number of feature point matches found (before and after filtering)
@@ -231,7 +259,14 @@ def get_fundamental_matrix(matched_ptsL, matched_ptsR, verbose=False):
     :param matched_ptsR: the feature points in the second image
     :param verbose: as in pipeline()
     """
-    fmatrix, fmap = cv2.findFundamentalMat(matched_ptsL, matched_ptsR, cv2.FM_RANSAC, 0.1, 0.99) #HYPERPARAM - 0.1, 0.999
+    # Randomly sort the matched pts lists to ensure this function yields a different output if repeated on the same input
+    indices = [x for x in range(len(matched_ptsL))]
+    # Shuffle the indices list
+    random.shuffle(indices)
+    # Now reconstruct the matched pts lists
+    matched_ptsL = np.array([matched_ptsL[i, :] for i in indices])
+    matched_ptsR = np.array([matched_ptsR[i, :] for i in indices])
+    fmatrix, fmap = cv2.findFundamentalMat(matched_ptsL, matched_ptsR, cv2.FM_RANSAC, 0.3, 0.999) #HYPERPARAM - 0.1, 0.999
     if verbose:
         # Print the fundamental matrix
         print("Fundamental matrix:")
@@ -394,6 +429,18 @@ def get_relative_rotation_translation(ematrix, k, ptsL, ptsR, fmap=None, verbose
     # Return the [R|t] matrix
     return rt_matrix
 
+def check_rt_matrix(current_rt_matrix, verbose=False):
+    """Check if the current [R|t] matrix is acceptable
+    :param current_rt_matrix: the [R|t] matrix to be checked
+    :param verbose: as in pipeline()
+    """
+    # Since the camera is mounted on a car, looking at 90' right or 90' left, there should be VERY little z translation
+    # Thus, only allow -0.05 < z < 0.05
+    current_z_translation = current_rt_matrix[2, 3]
+    if current_z_translation < -0.05 or current_z_translation > 0.05:
+        return False
+    return True
+
 def get_global_rotation_translation(global_rt_matrix_L, rt_matrix_R, verbose=False):
     """Compute the [R|t] matrix for imgR/camR from the first img/cam
 
@@ -549,7 +596,6 @@ def plot_point_cloud(pts4D, global_rt_list, pts4D_indices=[], verbose=False):
             pcd.points = open3d.Vector3dVector(pts3D[start:end])
             pcd.paint_uniform_color(colours[(index-1) % len(colours)])
             plot_list.append(pcd)
-        print("Plotted {} sets of 3D points".format(len(pts4D_indices) - 1))
     
     #TODO: fix this or remove it, currently not working perfectly and is not a priority
     # Plot a cone at each camera position
@@ -573,13 +619,12 @@ def plot_point_cloud(pts4D, global_rt_list, pts4D_indices=[], verbose=False):
     #     # Add the cone to the list of things to plot
     #     plot_list.append(cam_cone)
     
+    # Print the number of 3D points plotted
+    print("Plotted {} 3D points".format(len(pts3D)))
+    
     # Draw the point cloud
     open3d.draw_geometries(plot_list)
     
-    if verbose:
-        # Print the number of 3D points plotted
-        print("Plotted {} 3D points".format(len(pts3D)))
-
 #TODO
 def apply_bundle_adjustment():
     """Apply bundle adjustment
