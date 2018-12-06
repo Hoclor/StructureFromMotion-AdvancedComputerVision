@@ -47,14 +47,15 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
     global_rt_list = rtmatrix1.reshape(1, 3, 4) # List of the global [R|t] matrices for each image
     all_pts4D = None # List of all 4D points, to be plotted at the end
     pts4D_indices = [0]
-    acceptable = True
+    acceptable_z = True # Set this to true initially so that the pipeline initializes properly
+                        # This variable is used to exclude point clouds from frames for which no acceptable [R|t] matrix was found
     # Loop over all the other images
     for count in range(1, img_loader.count):
         if count+start_index+1 <= img_loader.count:
             print('Processing image {:3} out of {}'.format(count+start_index+1, img_loader.count))
         # Move the last image (imgR) into imgL, and its points into ptsL
         # Only do this if the last image wasn't skipped - if it was, disregard it and match to the 2nd last image instead
-        if acceptable:
+        if acceptable_z:
             imgL = imgR
             ptsL, descL = ptsR, descR
 
@@ -71,12 +72,12 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         # Find the feature point matches between imgL and imgR
         matches, imgL_matches, imgR_matches = match_feature_points(imgL, ptsL, descL, imgR, ptsR, descR, verbose=verbose, verbose_img=verbose_img)
 
-        # Repeat the below section of the pipeline until an acceptable [R|t] matrix is found. If none is found after TRIALS
+        # Repeat the below section of the pipeline until an acceptable_z [R|t] matrix is found. If none is found after TRIALS
         # tries, skip this image
-        acceptable = False
+        acceptable_z = False
         TRIALS = 30
         current_trial = 0
-        while not acceptable:
+        while not acceptable_z:
             if current_trial >= TRIALS:
                 # Skip this image
                 break
@@ -93,13 +94,13 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
                 rt_matrix_R = get_relative_rotation_translation(ematrix, k, imgL_matches, imgR_matches, fmap=fmap, verbose=verbose)
 
                 # Compare this relative [R|t] matrix with the last one
-                acceptable = check_rt_matrix(rt_matrix_R, verbose=verbose)
+                acceptable_z = check_rt_matrix(rt_matrix_R, verbose=verbose)
             
             current_trial += 1
-            if verbose and current_trial < TRIALS and not acceptable:
+            if verbose and current_trial < TRIALS and not acceptable_z:
                 print("Starting trial {}, cap: {}".format(current_trial + 1, TRIALS))
         
-        if not acceptable:
+        if not acceptable_z:
             # Skip this image
             print("Image skipped after {} trials".format(TRIALS))
             continue
@@ -324,7 +325,7 @@ def get_relative_rotation_translation(ematrix, k, ptsL, ptsR, fmap=None, verbose
     return rt_matrix
 
 def check_rt_matrix(current_rt_matrix, verbose=False):
-    """Check if the current [R|t] matrix is acceptable
+    """Check if the current [R|t] matrix is acceptable_z
     :param current_rt_matrix: the [R|t] matrix to be checked
     :param verbose: as in pipeline()
     """
@@ -536,8 +537,8 @@ def downsize_img(img, wmax=1600, hmax=900):
     The aspect ratio of the image is not changed.
 
     :param img: the image to downsize
-    :param wmax: the maximum acceptable width
-    :param hmax: the maximum acceptable height
+    :param wmax: the maximum acceptable_z width
+    :param hmax: the maximum acceptable_z height
     """
     # Downsize img until its width is less than wmax and height is less than hmax
     while img.shape[1] > wmax or img.shape[0] > hmax:
