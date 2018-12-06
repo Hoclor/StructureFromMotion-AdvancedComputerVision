@@ -8,8 +8,6 @@ import numpy as np
 import sys
 import os
 
-from mpl_toolkits.mplot3d import Axes3D
-import matplotlib.pyplot as plt
 import open3d
 
 def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
@@ -101,7 +99,7 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
             break
 
     # Plot the 3D points
-    plot_point_cloud(all_pts4D, global_rt_list, pts4D_indices=pts4D_indices, method='open3d', verbose=verbose)
+    plot_point_cloud(all_pts4D, global_rt_list, pts4D_indices=pts4D_indices, verbose=verbose)
 
 
 class Image_loader:
@@ -480,7 +478,7 @@ def triangulate_feature_points(global_rt_list, ptsL, ptsR, k, fmap=[], verbose=F
     # Return the list of 4D (homogeneous) points
     return pts4D
 
-def plot_point_cloud(pts4D, global_rt_list, pts4D_indices=[], method='open3d', verbose=False):
+def plot_point_cloud(pts4D, global_rt_list, pts4D_indices=[], verbose=False):
     """Create a point cloud of all 3D points found so far
 
     :param pts4D: a list of 4D (homogeneous) points to be plotted
@@ -490,12 +488,11 @@ def plot_point_cloud(pts4D, global_rt_list, pts4D_indices=[], method='open3d', v
         into one set for each pair of images processed. If this
         is the empty list, all points are plotted with the same
         colour.
-    :param method: the method used to plot the points,
-        either 'open3d' or 'matplotlib'
     :param verbose: as in pipeline()
     """
     # convert from homogeneous coordinates to 3D
     pts3D = pts4D[:, :3]/np.repeat(pts4D[:, 3], 3).reshape(-1, 3)
+
     # print(len(pts3D))
     # pts3D = np.array([point for point in pts3D if point[0] < 20 and point[1] < 20 and point[2] < 20])
     # print("Post processing:", len(pts3D))
@@ -535,65 +532,49 @@ def plot_point_cloud(pts4D, global_rt_list, pts4D_indices=[], method='open3d', v
         [0, 0, 0]
     ]
 
-    if(method == 'open3d'):
-        # Plot with open3d
-        plot_list = []
-        if len(pts4D_indices) == 0:
-            # Plot all points red
+    # Plot with open3d
+    plot_list = []
+    if len(pts4D_indices) == 0:
+        # Plot all points red
+        pcd = open3d.PointCloud()
+        pcd.points = open3d.Vector3dVector(pts3D)
+        pcd.paint_uniform_color([1, 0, 0])
+        plot_list.append(pcd)
+    else:
+        # Plot each set of points (for each image pair) a different colour
+        for index in range(1, len(pts4D_indices)):
+            start = pts4D_indices[index - 1]
+            end = pts4D_indices[index]
             pcd = open3d.PointCloud()
-            pcd.points = open3d.Vector3dVector(pts3D)
-            pcd.paint_uniform_color([1, 0, 0])
+            pcd.points = open3d.Vector3dVector(pts3D[start:end])
+            pcd.paint_uniform_color(colours[(index-1) % len(colours)])
             plot_list.append(pcd)
-        else:
-            # Plot each set of points (for each image pair) a different colour
-            for index in range(1, len(pts4D_indices)):
-                start = pts4D_indices[index - 1]
-                end = pts4D_indices[index]
-                pcd = open3d.PointCloud()
-                pcd.points = open3d.Vector3dVector(pts3D[start:end])
-                pcd.paint_uniform_color(colours[(index-1) % len(colours)])
-                plot_list.append(pcd)
-            print("Plotted {} sets of 3D points".format(len(pts4D_indices) - 1))
+        print("Plotted {} sets of 3D points".format(len(pts4D_indices) - 1))
+    
+    #TODO: fix this or remove it, currently not working perfectly and is not a priority
+    # Plot a cone at each camera position
+    # for index, rt_matrix in enumerate(global_rt_list):
+    #     # Create a small cone
+    #     cam_cone = open3d.create_mesh_cone(radius=0.5, height=1.0)
+    #     # Set the cone's colour to red
+    #     cam_cone.paint_uniform_color(colours[(index) % len(colours)])
+    #     # First flip the cone along the z axis
+    #     cam_cone.transform(np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1]).reshape(4, 4))
+    #     # Now transform the cone according to the (homogenized) [R|t] matrix
+    #     # cam_cone.transform(np.vstack((rt_matrix.itemset(4, -rt_matrix.item(4)), np.array([0, 0, 0, 1]))))
+    #     # rt_temp = np.copy(rt_matrix) #FIXME
+    #     # rt_temp[0, 3] = -rt_temp[0, 3]
+    #     # rt_temp[1, 3] = -rt_temp[1, 3]
+
+    #     # cam_cone.transform(np.vstack((rt_temp, np.array([0, 0, 0, 1]))))
+    #     # Alternative camera center computation
         
-        #TODO: fix this or remove it, currently not working perfectly and is not a priority
-        # Plot a cone at each camera position
-        # for index, rt_matrix in enumerate(global_rt_list):
-        #     # Create a small cone
-        #     cam_cone = open3d.create_mesh_cone(radius=0.5, height=1.0)
-        #     # Set the cone's colour to red
-        #     cam_cone.paint_uniform_color(colours[(index) % len(colours)])
-        #     # First flip the cone along the z axis
-        #     cam_cone.transform(np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1]).reshape(4, 4))
-        #     # Now transform the cone according to the (homogenized) [R|t] matrix
-        #     # cam_cone.transform(np.vstack((rt_matrix.itemset(4, -rt_matrix.item(4)), np.array([0, 0, 0, 1]))))
-        #     # rt_temp = np.copy(rt_matrix) #FIXME
-        #     # rt_temp[0, 3] = -rt_temp[0, 3]
-        #     # rt_temp[1, 3] = -rt_temp[1, 3]
 
-        #     # cam_cone.transform(np.vstack((rt_temp, np.array([0, 0, 0, 1]))))
-        #     # Alternative camera center computation
-            
-
-        #     # Add the cone to the list of things to plot
-        #     plot_list.append(cam_cone)
-        
-        # Draw the point cloud
-        open3d.draw_geometries(plot_list)
-
-    elif(method == 'matplotlib'):
-        # Plot with matplotlib
-        Xs = pts3D[:, 0] #Ys
-        Ys = pts3D[:, 1] #Zs
-        Zs = pts3D[:, 2] #Xs
-
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        ax.scatter(Xs, Ys, Zs, c='r', marker='o')
-        ax.set_xlabel('X') #Z
-        ax.set_ylabel('Y') #X
-        ax.set_zlabel('Z') #Y
-        plt.title('3D point cloud: Use pan axes button below to inspect')
-        plt.show()
+    #     # Add the cone to the list of things to plot
+    #     plot_list.append(cam_cone)
+    
+    # Draw the point cloud
+    open3d.draw_geometries(plot_list)
     
     if verbose:
         # Print the number of 3D points plotted
