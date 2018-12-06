@@ -24,9 +24,11 @@ def main():
     # Check if the dataset is one of the 3 sequences, and if so if it's the right or left camera
     if '2015-03-27_10-47-08_' in master_path_to_dataset:
         if 'monocular_left_calibrated' in master_path_to_dataset:
+            print("Using K for left sequences")
             K = np.copy(K_left)
             d = np.copy(d_left)
         elif 'monocular_right_calibrated' in master_path_to_dataset:
+            print("Using K for right sequences")
             K = np.copy(K_right)
             d = np.copy(d_right)
         else:
