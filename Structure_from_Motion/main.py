@@ -6,7 +6,7 @@ import numpy as np
 from pipeline import *
 
 # Path to the directory containing the images to be used as input. The images should be present directly in this directory (i.e. not in folders inside it)
-master_path_to_dataset = 'C:/Users/simon/GitRepositories/SSAIV_ACV/Dataset/2015-03-27_10-47-08_Seq2/monocular_left_calibrated/'
+master_path_to_dataset = 'C:/Users/simon/GitRepositories/SSAIV_ACV/Dataset/2015-03-27_10-47-08_Seq4/monocular_left_calibrated/'
 
 def main():
     # K and d of the left and right camera used for the 3 data sequences are known, if one of these is selected as the master_path_to_dataset load the appropriate K.
@@ -46,7 +46,7 @@ def main():
 
 
     # Execute the SfM pipeline on the image sequence
-    pipeline(master_path_to_dataset, K, verbose=True, verbose_img=True)
+    pipeline(master_path_to_dataset, K, verbose=False, verbose_img=False)
 
 if __name__ == '__main__':
     main()
