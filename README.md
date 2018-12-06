@@ -1,6 +1,11 @@
 # SSAIV_ACV
 Code for Structure from Motion assignment for Advanced Computer Vision as part of Software, Systems and Applications IV module, taken in my fourth year of Computer Science at Durham University.
 
+Required Python libraries:
+- numpy
+- opencv2 (version 3.3.*, or enable use of SURF)
+- open3d
+
 Structure from Motion pipeline:
 For each neighbouring image pair (i.e. 0 and 1, 1 and 2, ...)
 - Feature extraction in both images
