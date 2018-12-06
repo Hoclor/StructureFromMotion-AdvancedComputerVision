@@ -1,5 +1,5 @@
 # Original file copied from https://github.com/mbeyeler/opencv-python-blueprints/tree/master/chapter4
-# and edited to fit the task of the assignment
+# and edited to fit the task of the assignment and the re-designed processing pipeline in pipeline.py
 
 import numpy as np
 
@@ -9,7 +9,7 @@ from pipeline import *
 master_path_to_dataset = 'C:/Users/simon/GitRepositories/SSAIV_ACV/Dataset/2015-03-27_10-47-08_Seq2/monocular_left_calibrated/'
 
 def main():
-    # K and d of the left and right camera used for the 3 data sequences are known, if one of these is selected as the master_path_to_dataset load the appropriate K from K_array.
+    # K and d of the left and right camera used for the 3 data sequences are known, if one of these is selected as the master_path_to_dataset load the appropriate K.
 
     K_right = np.array([1.2432403472640376e+003, 0., 6.6606587228414776e+002, 0.,
        1.2331555645540684e+003, 4.5437658085060713e+002, 0., 0., 1.]).reshape(3, 3)
@@ -20,8 +20,6 @@ def main():
        1.1864252309660656e+003, 4.3318083737428361e+002, 0., 0., 1.]).reshape(3, 3)
     d_left = np.array([-4.8441890104482732e-001, 3.1770182182461387e-001,
        4.8167296939537890e-003, 5.9334794668205733e-004, -1.4902486951308128e-001]).reshape(1, 5)
-
-    #d_left = np.array([0.0, 0.0, 0.0, 0.0, 0.0]).reshape(1, 5)
 
     # Check if the dataset is one of the 3 sequences, and if so if it's the right or left camera
     if '2015-03-27_10-47-08_' in master_path_to_dataset:
