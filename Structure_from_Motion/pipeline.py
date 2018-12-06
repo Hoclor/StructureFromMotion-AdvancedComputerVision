@@ -85,7 +85,7 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
             fmatrix, fmap = get_fundamental_matrix(imgL_matches, imgR_matches, verbose=verbose)
 
             # If no fmatrix was found, skip the following
-            if fmatrix != None:
+            if type(fmatrix) != type(None):
 
                 # Calculate the essential matrix
                 ematrix = get_essential_matrix(fmatrix, k, verbose=verbose)
@@ -490,28 +490,6 @@ def plot_point_cloud(pts4D, global_rt_list, pts4D_indices=[], verbose=False):
             pcd.points = open3d.Vector3dVector(pts3D[start:end])
             pcd.paint_uniform_color(colours[(index-1) % len(colours)])
             plot_list.append(pcd)
-    
-    #TODO: fix this or remove it, currently not working perfectly and is not a priority
-    # Plot a cone at each camera position
-    # for index, rt_matrix in enumerate(global_rt_list):
-    #     # Create a small cone
-    #     cam_cone = open3d.create_mesh_cone(radius=0.5, height=1.0)
-    #     # Set the cone's colour to red
-    #     cam_cone.paint_uniform_color(colours[(index) % len(colours)])
-    #     # First flip the cone along the z axis
-    #     cam_cone.transform(np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1]).reshape(4, 4))
-    #     # Now transform the cone according to the (homogenized) [R|t] matrix
-    #     # cam_cone.transform(np.vstack((rt_matrix.itemset(4, -rt_matrix.item(4)), np.array([0, 0, 0, 1]))))
-    #     # rt_temp = np.copy(rt_matrix) #FIXME
-    #     # rt_temp[0, 3] = -rt_temp[0, 3]
-    #     # rt_temp[1, 3] = -rt_temp[1, 3]
-
-    #     # cam_cone.transform(np.vstack((rt_temp, np.array([0, 0, 0, 1]))))
-    #     # Alternative camera center computation
-        
-
-    #     # Add the cone to the list of things to plot
-    #     plot_list.append(cam_cone)
     
     # Print the number of 3D points plotted
     print("Plotted {} 3D points".format(len(pts3D)))
