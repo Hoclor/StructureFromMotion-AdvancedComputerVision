@@ -44,6 +44,7 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
 
     # Initialize some variables used for the entire sequence
     rtmatrix1 = np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], dtype=np.float64).reshape(3, 4) # The global [R|t] matrix for image 1
+    # last_rt_matrix = np.copy(rtmatrix1) # Tracks the last relative rt matrix for comparison
     global_rt_list = rtmatrix1.reshape(1, 3, 4) # List of the global [R|t] matrices for each image
     all_pts4D = None # List of all 4D points, to be plotted at the end
     pts4D_indices = [0]
@@ -55,8 +56,8 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         # Move the last image (imgR) into imgL, and its points into ptsL
         # Only do this if the last image wasn't skipped - if it was, disregard it and match to the 2nd last image instead
         if acceptable:
-        imgL = imgR
-        ptsL, descL = ptsR, descR
+            imgL = imgR
+            ptsL, descL = ptsR, descR
 
         # Load the next image into imgR
         imgR = img_loader.next()
@@ -80,14 +81,14 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
             if current_trial >= TRIALS:
                 # Skip this image
                 break
-        # Estimate the fundamental matrix
-        fmatrix, fmap = get_fundamental_matrix(imgL_matches, imgR_matches, verbose=verbose)
+            # Estimate the fundamental matrix
+            fmatrix, fmap = get_fundamental_matrix(imgL_matches, imgR_matches, verbose=verbose)
 
-        # Calculate the essential matrix
-        ematrix = get_essential_matrix(fmatrix, k, verbose=verbose)
+            # Calculate the essential matrix
+            ematrix = get_essential_matrix(fmatrix, k, verbose=verbose)
 
-        # Get the relative [R|t] matrix
-        rt_matrix_R = get_relative_rotation_translation(ematrix, k, imgL_matches, imgR_matches, fmap=fmap, verbose=verbose)
+            # Get the relative [R|t] matrix
+            rt_matrix_R = get_relative_rotation_translation(ematrix, k, imgL_matches, imgR_matches, fmap=fmap, verbose=verbose)
 
             # Compare this relative [R|t] matrix with the last one
             acceptable = check_rt_matrix(rt_matrix_R, verbose=verbose)
@@ -110,13 +111,21 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
 
         # Triangulate the matched feature points
         pts4D = triangulate_feature_points(global_rt_list, imgL_matches, imgR_matches, k, fmap=fmap, verbose=verbose)
+        # Triangulate the matched feature points locally
+        # local_pts4D = triangulate_feature_points(np.array([global_rt_list[0, :, :], rt_matrix_R]), imgL_matches, imgR_matches, k, fmap=fmap, verbose=verbose)
 
-        # Add the list of 4D pts to the list of all 4D pts
-        if type(all_pts4D) != type(None):
-            pts4D_indices.append(len(all_pts4D))
-            all_pts4D = np.concatenate((all_pts4D, pts4D))
-        else:
-            all_pts4D = pts4D
+        # Check the average point coordinate of pts4D
+        # print("Average X:", sum(local_pts4D[:, 0])/len(local_pts4D))
+        # print("Average Y:", sum(local_pts4D[:, 1])/len(local_pts4D))
+        # print("Average Z:", sum(local_pts4D[:, 2])/len(local_pts4D))
+        # If the average Y value is > 0.11, do not add this point set to the points list
+        # if sum(local_pts4D[:, 1])/len(local_pts4D) < 0.11:
+        #     # Add the list of 4D pts to the list of all 4D pts
+        #     if type(all_pts4D) != type(None):
+        #         pts4D_indices.append(len(all_pts4D))
+        #         all_pts4D = np.concatenate((all_pts4D, pts4D))
+        #     else:
+        #         all_pts4D = pts4D
 
         if verbose_img:
             # Plot the point cloud of points from this image match
@@ -412,7 +421,7 @@ def get_relative_rotation_translation(ematrix, k, ptsL, ptsR, fmap=None, verbose
         were inliers for the creation of the fundamental and essential
         matrices
     :param verbose: as in pipeline()
-    """    
+    """
     # Use recoverPose to compute the R and t matrices
     points, R, t, mask = cv2.recoverPose(ematrix, ptsL, ptsR, k, mask=fmap)
     #TODO: try to fix plot being upside down - can probably he HACK'ed here
@@ -493,11 +502,7 @@ def triangulate_feature_points(global_rt_list, ptsL, ptsR, k, fmap=[], verbose=F
     # triangulate points
     # Multiply [R|t] by k to yield the camera perspective matrix
     r_L = global_rt_list[-2, :, :]
-    with np.printoptions(suppress=True):
-        print("R_L normalized:\n", r_L)
     r_L = np.matmul(k, r_L)
-    with np.printoptions(suppress=True):
-        print("R_L non-normalized:\n", r_L)
     r_R = global_rt_list[-1, :, :]
     r_R = np.matmul(k, r_R)
 
@@ -578,6 +583,8 @@ def plot_point_cloud(pts4D, global_rt_list, pts4D_indices=[], verbose=False):
         [0.5, 0.5, 1],
         [0, 0, 0]
     ]
+    # cv2.projectPoints()
+    # pcd.colors = Vector3dVector(np_colors)
 
     # Plot with open3d
     plot_list = []
@@ -624,7 +631,7 @@ def plot_point_cloud(pts4D, global_rt_list, pts4D_indices=[], verbose=False):
     
     # Draw the point cloud
     open3d.draw_geometries(plot_list)
-    
+
 #TODO
 def apply_bundle_adjustment():
     """Apply bundle adjustment
