@@ -48,6 +48,7 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
     pts4D_indices = [0]
     acceptable_z = True # Set this to true initially so that the pipeline initializes properly
                         # This variable is used to exclude point clouds from frames for which no acceptable [R|t] matrix was found
+    TRIALS = 30 # The maximum number of trials of finding F that are performed before the image is skipped
     # Loop over all the other images
     for count in range(1, img_loader.count):
         if count+start_index+1 <= img_loader.count:
@@ -74,7 +75,6 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         # Repeat the below section of the pipeline until an acceptable_z [R|t] matrix is found. If none is found after TRIALS
         # tries, skip this image
         acceptable_z = False
-        TRIALS = 30
         current_trial = 0
         while not acceptable_z:
             if current_trial >= TRIALS:
