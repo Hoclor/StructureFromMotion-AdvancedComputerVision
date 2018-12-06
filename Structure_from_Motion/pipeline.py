@@ -127,6 +127,13 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         #     else:
         #         all_pts4D = pts4D
 
+        # Add the list of 4D pts to the list of all 4D pts
+        if type(all_pts4D) != type(None):
+            pts4D_indices.append(len(all_pts4D))
+            all_pts4D = np.concatenate((all_pts4D, pts4D))
+        else:
+            all_pts4D = pts4D
+
         if verbose_img:
             # Plot the point cloud of points from this image match
             plot_point_cloud(pts4D, global_rt_matrix_R.reshape(1, 3, 4), verbose=verbose)
