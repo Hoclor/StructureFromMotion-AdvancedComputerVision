@@ -480,13 +480,6 @@ def triangulate_feature_points(global_rt_list, ptsL, ptsR, k, fmap=[], verbose=F
     # Return the list of 4D (homogeneous) points
     return pts4D
 
-#TODO: if the above function only finds relative/local 3D position, this function is needed
-# def adjust_feature_points():
-#     """
-
-#     """
-#     pass
-
 def plot_point_cloud(pts4D, global_rt_list, pts4D_indices=[], method='open3d', verbose=False):
     """Create a point cloud of all 3D points found so far
 
@@ -572,8 +565,8 @@ def plot_point_cloud(pts4D, global_rt_list, pts4D_indices=[], method='open3d', v
         #     # First flip the cone along the z axis
         #     cam_cone.transform(np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1]).reshape(4, 4))
         #     # Now transform the cone according to the (homogenized) [R|t] matrix
-        #     # cam_cone.transform(np.vstack((rt_matrix.itemset(4, -rt_matrix.item(4)), np.array([0, 0, 0, 1])))) TODO
-        #     # rt_temp = np.copy(rt_matrix) #TODO FIXME
+        #     # cam_cone.transform(np.vstack((rt_matrix.itemset(4, -rt_matrix.item(4)), np.array([0, 0, 0, 1]))))
+        #     # rt_temp = np.copy(rt_matrix) #FIXME
         #     # rt_temp[0, 3] = -rt_temp[0, 3]
         #     # rt_temp[1, 3] = -rt_temp[1, 3]
 
