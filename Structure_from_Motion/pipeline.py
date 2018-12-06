@@ -44,7 +44,6 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
 
     # Initialize some variables used for the entire sequence
     rtmatrix1 = np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], dtype=np.float64).reshape(3, 4) # The global [R|t] matrix for image 1
-    # last_rt_matrix = np.copy(rtmatrix1) # Tracks the last relative rt matrix for comparison
     global_rt_list = rtmatrix1.reshape(1, 3, 4) # List of the global [R|t] matrices for each image
     all_pts4D = None # List of all 4D points, to be plotted at the end
     pts4D_indices = [0]
@@ -111,21 +110,6 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
 
         # Triangulate the matched feature points
         pts4D = triangulate_feature_points(global_rt_list, imgL_matches, imgR_matches, k, fmap=fmap, verbose=verbose)
-        # Triangulate the matched feature points locally
-        # local_pts4D = triangulate_feature_points(np.array([global_rt_list[0, :, :], rt_matrix_R]), imgL_matches, imgR_matches, k, fmap=fmap, verbose=verbose)
-
-        # Check the average point coordinate of pts4D
-        # print("Average X:", sum(local_pts4D[:, 0])/len(local_pts4D))
-        # print("Average Y:", sum(local_pts4D[:, 1])/len(local_pts4D))
-        # print("Average Z:", sum(local_pts4D[:, 2])/len(local_pts4D))
-        # If the average Y value is > 0.11, do not add this point set to the points list
-        # if sum(local_pts4D[:, 1])/len(local_pts4D) < 0.11:
-        #     # Add the list of 4D pts to the list of all 4D pts
-        #     if type(all_pts4D) != type(None):
-        #         pts4D_indices.append(len(all_pts4D))
-        #         all_pts4D = np.concatenate((all_pts4D, pts4D))
-        #     else:
-        #         all_pts4D = pts4D
 
         if verbose_img:
             # Plot the point cloud of points from this image match
@@ -306,109 +290,6 @@ def get_essential_matrix(fmatrix, k, verbose=False):
     # Return the essential matrix
     return ematrix
 
-def _get_relative_rotation_translation_OLD(ematrix, k, ptsL, ptsR, verbose=False):
-    """Compute the [R|t] matrix for imgR/camR from imgL/camL
-
-    :param ematrix: the essential matrix corresponding to these two
-        images/cameras
-    :param ptsL: the matched points in the first image
-    :param ptsR: the corresponding matched points in the second image
-    :param verbose: as in pipeline()
-    """
-    def _in_front_of_both_cameras(first_points, second_points, rot,
-                                    trans):
-        """Determines whether point correspondences are in front of both
-        images.
-        Copied from https://github.com/mbeyeler/opencv-python-blueprints/tree/master/chapter4
-        """
-        for first, second in zip(first_points, second_points):
-            first_z = np.dot(rot[0, :] - second[0]*rot[2, :],
-                                trans) / np.dot(rot[0, :] - second[0]*rot[2, :],
-                                                second)
-            first_3d_point = np.array([first[0] * first_z,
-                                        second[0] * first_z, first_z])
-            second_3d_point = np.dot(rot.T, first_3d_point) - np.dot(rot.T,
-                                                                        trans)
-
-            if first_3d_point[2] < 0 or second_3d_point[2] < 0:
-                return False
-
-        return True
-
-    # Decompose the essential matrix through singular value decomposition to get U, s, V.T
-    U, s, V = np.linalg.svd(ematrix)
-    V = V.T # convert V.T to V
-
-    # Construct sigma as [[s, 0, 0], [0, s, 0], [0, 0, 0]]
-    # for the lowest value in s (list of possible s values, sorted so lowest value is at index -1)
-    sigma = np.array([s[-1], 0, 0, 0, s[-1], 0, 0, 0, 0]).reshape(3, 3)
-
-    # Construct W as [[0, -1, 0,], [1, 0, 0], [0, 0, 1]]. Note: W.T = W^(-1)
-    W = np.array([0, -1, 0, 1, 0, 0, 0, 0, 1]).reshape(3, 3)
-    # W = W.T
-
-    # Compute R = U * W^(-1) * V.T
-    R = np.matmul(np.matmul(U, W.T), V.T)
-
-    # # Compute [t]_x = U * W * sigma * U.T
-    # t_x = np.matmul(np.matmul(np.matmul(U, W), sigma), U.T)
-    # # Extract the values of t from t_x, as t_x = 
-    #     #  0   -t_3  t_2
-    #     #  t_3  0   -t_1
-    #     # -t_2  t_1  0
-    # t = np.array([t_x[2][1], t_x[0][2], t_x[1][0]]).reshape(3, 1)
-
-    # Compute [t]_x using alternative definition of U * Z * U.T, where Z =
-        #  0 1 0
-        # -1 0 0
-        #  0 0 0
-    Z = np.array([0, 1, 0, -1, 0, 0, 0, 0, 0]).reshape(3, 3)
-    t_x = np.matmul(np.matmul(U, Z), U.T)
-    t = np.array([t_x[2][1], t_x[0][2], t_x[1][0]]).reshape(3, 1)
-
-    # Check if this [R|t] matrix actually makes sense, i.e. the 3D points produced are in front of the camera
-    # This must be done as there are four possible [R|t] matrices, but only one makes sense in practice
-    # The four possibilities are constructed through setting W = W.T and/or t = -t in the computation above
-
-    # Convert the input ptsL and ptsR to homogeneous coordinates
-    ptsL_h = []
-    for point in ptsL:
-        ptsL_h.append(np.linalg.inv(k).dot([point[0], point[1], 1.0]))
-    ptsR_h = []
-    for point in ptsR:
-        ptsR_h.append(np.linalg.inv(k).dot([point[0], point[1], 1.0]))
-
-    if not _in_front_of_both_cameras(ptsL_h, ptsR_h, R, t):
-        # Try t = -t
-        t = np.negative(t)
-
-        # Check again
-        if not _in_front_of_both_cameras(ptsL_h, ptsR_h, R, t):
-            # Try W = W.T and t = -t
-            R = np.matmul(np.matmul(U, W), V.T)
-            
-            # Check again
-            if not _in_front_of_both_cameras(ptsL_h, ptsR_h, R, t):
-                # It must now be W = W.T and t = t
-                t = np.negative(t)
-    
-    #HACK
-    # Check if the diagonal of R is all negative values. If so, negate R
-    if R[0, 0] < 0 and R[1, 1] < 0 and R[2, 2] < 0:
-        R = np.negative(R)
-
-    # Construct [R|t] matrix
-    rt_matrix = np.hstack((R, t))
-
-    if verbose:
-        # Print out the [R|t] matrix
-        print("[R|t] matrix:")
-        with np.printoptions(suppress=True):
-            print(rt_matrix)
-    
-    # Return the [R|t] matrix
-    return rt_matrix
-
 def get_relative_rotation_translation(ematrix, k, ptsL, ptsR, fmap=None, verbose=False):
     """Compute the [R|t] matrix using cv2.recoverPose
 
@@ -444,7 +325,8 @@ def check_rt_matrix(current_rt_matrix, verbose=False):
     :param verbose: as in pipeline()
     """
     # Since the camera is mounted on a car, looking at 90' right or 90' left, there should be VERY little z translation
-    # Thus, only allow -0.05 < z < 0.05
+    # Thus, only allow -0.05 < z < 0.05 - even when the car is turning, this should work as the relative z translation
+    #   from frame-to-frame will be very small
     current_z_translation = current_rt_matrix[2, 3]
     if current_z_translation < -0.05 or current_z_translation > 0.05:
         return False
