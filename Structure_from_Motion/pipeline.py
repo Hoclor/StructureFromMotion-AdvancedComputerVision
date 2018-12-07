@@ -28,7 +28,7 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         relevant
     """
     # Create the image loader
-    img_loader = Image_loader(path_to_dataset, verbose)
+    img_loader = Image_loader(path_to_dataset, verbose_img)
 
     # Skip to a specific image
 
@@ -144,14 +144,14 @@ class Image_loader:
         Once initiated, the next image is loaded through next().
 
     """
-    def __init__(self, path_to_dataset, verbose=False):
+    def __init__(self, path_to_dataset, verbose_img=False):
         self.path = path_to_dataset
         self.index = 0
         # Create an alphabetical list of all the images in the given directory
         with os.scandir(path_to_dataset) as file_iterator:
             self.images = sorted([file_object.name for file_object in list(file_iterator)])
         self.count = len(self.images)
-        self.verbose=verbose
+        self.verbose_img=verbose_img
 
     def next(self):
         """Loads the next image from the given directory
@@ -162,6 +162,13 @@ class Image_loader:
         if self.index >= self.count:
             return False
         img = cv2.imread(self.path + self.images[self.index])
+        if self.verbose_img:
+            disp_img = np.copy(img)
+            disp_img = downsize_img(disp_img)
+            # Output the image
+            cv2.imshow(self.images[self.index], disp_img)
+            if cv2.waitKey(0) == 113:
+                cv2.destroyWindow(self.images[self.index])
         self.index += 1
         return img
     
@@ -171,6 +178,13 @@ class Image_loader:
         Causes an error if there is no file with that name in the directory.
         """
         img = cv2.imread(self.path + img_name)
+        if self.verbose_img:
+            disp_img = np.copy(img)
+            disp_img = downsize_img(disp_img)
+            # Output the image
+            cv2.imshow(img_name, disp_img)
+            if cv2.waitKey(0) == 113:
+                cv2.destroyWindow(self.images[self.index])
         return img
     
     def reset(self, new_index=0):
