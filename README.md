@@ -2,6 +2,7 @@
 Code for Structure from Motion assignment for Advanced Computer Vision as part of Software, Systems and Applications IV module, taken in my fourth year of Computer Science at Durham University.
 
 Required Python libraries:
+- python (3.6.7 64-bit preferably)
 - numpy
 - opencv2 (version 3.3.*, or enable use of SURF when building the library)
 - open3d
