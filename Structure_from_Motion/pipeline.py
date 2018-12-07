@@ -45,6 +45,7 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
     rtmatrix1 = np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], dtype=np.float64).reshape(3, 4) # The global [R|t] matrix for image 1
     global_rt_list = rtmatrix1.reshape(1, 3, 4) # List of the global [R|t] matrices for each image
     all_pts4D = None # List of all 4D points, to be plotted at the end
+    all_colours4D = None # List of colour for each 4D point, to be plotted at the end
     pts4D_indices = [0]
     acceptable_z = True # Set this to true initially so that the pipeline initializes properly
                         # This variable is used to exclude point clouds from frames for which no acceptable [R|t] matrix was found
@@ -115,19 +116,24 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         # Triangulate the matched feature points
         pts4D = triangulate_feature_points(global_rt_list, imgL_matches, imgR_matches, k, fmap=fmap, verbose=verbose)
 
-        # Add the list of 4D pts to the list of all 4D pts
+        # Get the 4D point colours
+        colours4D = get_point_colours(imgL, imgL_matches, imgR, imgR_matches, pts4D, fmap, verbose=verbose)
+
+        # Add the list of 4D pts to the list of all 4D pts, and colours to list of all colours
         if type(all_pts4D) != type(None):
             pts4D_indices.append(len(all_pts4D))
             all_pts4D = np.concatenate((all_pts4D, pts4D))
+            all_colours4D = np.concatenate((all_colours4D, colours4D))
         else:
             all_pts4D = pts4D
+            all_colours4D = colours4D
 
         if verbose_img:
             # Plot the point cloud of points from this image match
-            plot_point_cloud(pts4D, verbose=verbose)
+            plot_point_cloud(pts4D, colours4D=colours4D, verbose=verbose)
 
     # Plot the 3D points
-    plot_point_cloud(all_pts4D, pts4D_indices=[], verbose=verbose)
+    plot_point_cloud(all_pts4D, colours4D=all_colours4D, verbose=verbose)
 
 
 class Image_loader:
@@ -421,7 +427,47 @@ def triangulate_feature_points(global_rt_list, ptsL, ptsR, k, fmap=[], verbose=F
     # Return the list of 4D (homogeneous) points
     return pts4D
 
-def plot_point_cloud(pts4D, pts4D_indices=[], verbose=False):
+def get_point_colours(imgL, ptsL, imgR, ptsR, pts4D, fmap, verbose=False):
+    """Extract the colour of each 4D point as the average of the
+    corresponding point in the left and right image.
+
+    :param imgL: the left image
+    :param ptsL: the set of matched points in the left image
+    :param imgR: the right image
+    :param ptsR: the set of matched points in the right image
+    :param pts4D: the set of 4D points (homogeneous 3D points)
+    :param fmap: the map of inliers, mapping points in ptsL/ptsR to pts4D
+    :param verbose: as in pipeline()
+    """
+    # Get the colour of each 4D point as the average colour between the two matched pixels corresponding to it
+    colours4D = []
+    for index, inlier in enumerate(fmap):
+        if inlier:
+            # Get the corresponding left and right point
+            this_ptsL = np.round(ptsL[index, :]).astype(np.int32)
+            this_ptsR = np.round(ptsR[index, :]).astype(np.int32)
+
+            # Convert these to integers
+            
+            # Get the left pixel value
+            left_pixel = imgL[this_ptsL[1]][this_ptsL[0]]
+            # Get the right pixel value
+            right_pixel = imgL[this_ptsR[1]][this_ptsR[0]]
+
+            # Average these, and divide by 255 to give a float colour values
+            pixel4D = ((int(left_pixel[0]) + int(right_pixel[0]))/2)/255
+            pixel4D = np.array(pixel4D).repeat(3)
+
+            # Add this to the colours list
+            colours4D.append(pixel4D)
+
+    # Convert colours4D to a np array
+    colours4D = np.array(colours4D)
+
+    # Return the colours
+    return colours4D
+
+def plot_point_cloud(pts4D, colours4D=[], pts4D_indices=[], verbose=False):
     """Create a point cloud of all 3D points found so far
 
     :param pts4D: a list of 4D (homogeneous) points to be plotted
@@ -477,12 +523,22 @@ def plot_point_cloud(pts4D, pts4D_indices=[], verbose=False):
 
     # Plot with open3d
     plot_list = []
-    if len(pts4D_indices) == 0:
+    # If no indices or colours are given, paint all point red
+    if len(pts4D_indices) == 0 and len(colours4D) == 0:
         # Plot all points red
         pcd = open3d.PointCloud()
         pcd.points = open3d.Vector3dVector(pts3D)
         pcd.paint_uniform_color([1, 0, 0])
         plot_list.append(pcd)
+    # If colours are given, use these
+    elif len(colours4D) > 0:
+        # Plot each point with its given colour
+        pcd = open3d.PointCloud()
+        pcd.points = open3d.Vector3dVector(pts3D)
+        pcd.colors = open3d.Vector3dVector(colours4D)
+        plot_list.append(pcd)
+    # If no colours are given but indices are given, paint each set (between each index)
+    # a different colour from the colour list above
     else:
         # Plot each set of points (for each image pair) a different colour
         for index in range(1, len(pts4D_indices)):
