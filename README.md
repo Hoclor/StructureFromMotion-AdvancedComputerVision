@@ -3,29 +3,16 @@ Code for Structure from Motion assignment for Advanced Computer Vision as part o
 
 Required Python libraries:
 - numpy
-- opencv2 (version 3.3.*, or enable use of SURF)
+- opencv2 (version 3.3.*, or enable use of SURF when building the library)
 - open3d
 
 Structure from Motion pipeline:
 For each neighbouring image pair (i.e. 0 and 1, 1 and 2, ...)
-- Feature extraction in both images
-- Feature matching between images
-- Fundamental matrix estimation
-    - RANSAC:
-        - Pick 8 feature matches
-        - Compute F
-        - Find inliars with F amongst other feature matches
-        - Pick F with most inliars
-- Compute Essential matrix
-    - From F, camera intrinsics
-- Get camera perspective transform (rotation and translation)
-    - Relative to previous camera and/or absolute change from 'zero' position (i.e. from first image in dataset)
-- Triangulate feature points to get 3D points
-- Modify the resulting 3D points with camera rotation and translation to yield correct global position
-After the above
-- Bundle adjustment to improve final result/global positioning
-- Create and visualise 3D terrain point cloud
-    - matplotlib?
-
-Extra functionality:
-- Apply dense stereo to yield a more dense point cloud/3D model
+- Feature point extraction
+- Feature point matching between the images
+- Estimation of the Fundamental matrix through RANSAC on the feature matches
+- Computation of the Essential matrix
+- Computation of relative camera matrix (rotation and translation) of the second camera from the first
+- Camera matrix composition to produce global camera matrix of the first and second camera
+- Triangulation of matched feature points to produce 3D points
+- Creation and plotting of 3D point cloud for visualization
