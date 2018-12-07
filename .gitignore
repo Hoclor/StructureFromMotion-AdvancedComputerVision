@@ -4,7 +4,7 @@
 Structure_from_Motion/cycleimages.py
 temp.*
 report*
-
+!report.pdf
 
 ### Pre-generated ###
 
