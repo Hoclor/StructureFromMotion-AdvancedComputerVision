@@ -7,6 +7,11 @@ from pipeline import *
 
 # Path to the directory containing the images to be used as input. The images should be present directly in this directory (i.e. not in folders inside it)
 master_path_to_dataset = 'C:/Users/simon/GitRepositories/SSAIV_ACV/Dataset/2015-03-27_10-47-08_Seq2/monocular_left_calibrated/'
+verbose = True #Whether text outputs should be given during the execution of the pipeline
+verbose_img = True # Whether image outputs should be given during the execution of the pipeline
+# For efficiency in executing the entire pipeline, set both of the above to False. For inspecting the steps of the pipeline, and the
+# quality of the output, set them to True.
+
 
 def main():
     # K and d of the left and right camera used for the 3 data sequences are known, if one of these is selected as the master_path_to_dataset load the appropriate K.
@@ -46,7 +51,7 @@ def main():
 
 
     # Execute the SfM pipeline on the image sequence
-    pipeline(master_path_to_dataset, K, verbose=False, verbose_img=False)
+    pipeline(master_path_to_dataset, K, verbose=verbose, verbose_img=verbose_img)
 
 if __name__ == '__main__':
     main()
