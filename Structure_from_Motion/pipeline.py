@@ -30,9 +30,7 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
     # Create the image loader
     img_loader = Image_loader(path_to_dataset, verbose_img)
 
-    # Skip to a specific image
-
-    # Set the start index, for printing purposes only
+    # Set the start index, used for printing purposes only
     start_index = img_loader.index
     # load the first image into imgR (i.e. pretend we just processed this image in a previous pair)
     print('Processing image {:3} out of {}'.format(start_index+1, img_loader.count))
@@ -44,9 +42,8 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
     # Initialize some variables used for the entire sequence
     rtmatrix1 = np.array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0], dtype=np.float64).reshape(3, 4) # The global [R|t] matrix for image 1
     global_rt_list = rtmatrix1.reshape(1, 3, 4) # List of the global [R|t] matrices for each image
-    all_pts4D = None # List of all 4D points, to be plotted at the end
-    all_colours4D = None # List of colour for each 4D point, to be plotted at the end
-    pts4D_indices = [0]
+    all_pts4D = None                            # List of all 4D points, to be plotted at the end
+    all_colours4D = None                        # List of colour for each 4D point, to be plotted at the end
     acceptable_z = True # Set this to true initially so that the pipeline initializes properly
                         # This variable is used to exclude point clouds from frames for which no acceptable [R|t] matrix was found
     TRIALS = 30 # The maximum number of trials of finding F that are performed before the image is skipped
@@ -64,7 +61,8 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         imgR = img_loader.next()
         # Check that the image was loaded correctly. If not, it will be False
         if type(imgR) == bool and imgR == False:
-            # This means there are no more images to load, so break out of the loop and plot the points
+            # This means there are no more images to load, OR something went wrong, so break out of the loop and plot the points
+            # gathered so far
             break
 
         # Extract feature points of the second image
@@ -73,20 +71,19 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
         # Find the feature point matches between imgL and imgR
         matches, imgL_matches, imgR_matches = match_feature_points(imgL, ptsL, descL, imgR, ptsR, descR, verbose=verbose, verbose_img=verbose_img)
 
-        # Repeat the below section of the pipeline until an acceptable_z [R|t] matrix is found. If none is found after TRIALS
-        # tries, skip this image
+        # Repeat the below section of the pipeline until an acceptable_z [R|t] matrix is found. If none is found after TRIALS tries, skip this image
         acceptable_z = False
         current_trial = 0
         while not acceptable_z:
             if current_trial >= TRIALS:
                 # Skip this image
                 break
+
             # Estimate the fundamental matrix
             fmatrix, fmap = get_fundamental_matrix(imgL_matches, imgR_matches, verbose=verbose)
 
             # If no fmatrix was found, skip the following
             if type(fmatrix) != type(None):
-
                 # Calculate the essential matrix
                 ematrix = get_essential_matrix(fmatrix, k, verbose=verbose)
 
@@ -105,7 +102,8 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
             print("Image skipped after {} trials".format(TRIALS))
             continue
         
-        print('Trials required: {}'.format(current_trial))
+        if verbose:
+            print('Trials required: {}'.format(current_trial))
 
         # Convert the relative rtmatrix above into a global rtmatrix
         global_rt_matrix_R = get_global_rotation_translation(global_rt_list[-1, :, :], rt_matrix_R, verbose=verbose)
@@ -121,7 +119,6 @@ def pipeline(path_to_dataset, k, verbose=False, verbose_img=False):
 
         # Add the list of 4D pts to the list of all 4D pts, and colours to list of all colours
         if type(all_pts4D) != type(None):
-            pts4D_indices.append(len(all_pts4D))
             all_pts4D = np.concatenate((all_pts4D, pts4D))
             all_colours4D = np.concatenate((all_colours4D, colours4D))
         else:
@@ -206,7 +203,7 @@ def get_feature_points(img, verbose=False, verbose_img=False, image_name='Img'):
     :param image_name: the name of the image to be displayed
     """
     # Create the SURF feature detector - higher value = fewer points
-    detector = cv2.xfeatures2d.SURF_create(750) #HYPERPARAM - 350, 750
+    detector = cv2.xfeatures2d.SURF_create(750) #HYPERPARAM - 750
     # Find the keypoints and descriptors in the image
     kp, desc = detector.detectAndCompute(img, None)
 
@@ -248,7 +245,7 @@ def match_feature_points(imgL, ptsL, descL, imgR, ptsR, descR, verbose=False, ve
     matches = matcher.knnMatch(descL, descR, k=2)
     pre_filtering_matches = len(matches)
     # Apply the ratio test: x is best match, y is second best match, lower distance is better
-    matches = [x for x, y in matches if x.distance < 0.7*y.distance] #HYPERPARAM - 0.5*distance
+    matches = [x for x, y in matches if x.distance < 0.7*y.distance] #HYPERPARAM - 0.7*distance
 
     if verbose:
         # Print the number of feature point matches found (before and after filtering)
@@ -286,7 +283,7 @@ def get_fundamental_matrix(matched_ptsL, matched_ptsR, verbose=False):
     # Now reconstruct the matched pts lists
     matched_ptsL = np.array([matched_ptsL[i, :] for i in indices])
     matched_ptsR = np.array([matched_ptsR[i, :] for i in indices])
-    fmatrix, fmap = cv2.findFundamentalMat(matched_ptsL, matched_ptsR, cv2.FM_RANSAC, 0.3, 0.999) #HYPERPARAM - 0.1, 0.999
+    fmatrix, fmap = cv2.findFundamentalMat(matched_ptsL, matched_ptsR, cv2.FM_RANSAC, 0.3, 0.999) #HYPERPARAM - 0.3, 0.999
     if verbose:
         # Print the fundamental matrix
         print("Fundamental matrix:")
@@ -353,9 +350,8 @@ def check_rt_matrix(current_rt_matrix, fmap, verbose=False):
     """
     # Since the camera is mounted on a car, looking at 90' right or 90' left, there should be VERY little z translation
     # Thus, only allow -0.05 < z < 0.05 - even when the car is turning, this should work as the relative z translation
-    #   from frame-to-frame will be very small
-
-    # Also require that at least 100 points were inliers from the [R|t] creation, i.e. are in view of the camera
+    # from frame-to-frame will be very small. Also require that at least 100 points were inliers from the [R|t] creation,
+    # i.e. are in view of the camera.
     current_z_translation = current_rt_matrix[2, 3]
     if abs(current_z_translation) < 0.05 and sum(fmap) > 50:
         return True
@@ -461,8 +457,6 @@ def get_point_colours(imgL, ptsL, imgR, ptsR, pts4D, fmap, verbose=False):
             this_ptsL = np.round(ptsL[index, :]).astype(np.int32)
             this_ptsR = np.round(ptsR[index, :]).astype(np.int32)
 
-            # Convert these to integers
-            
             # Get the left pixel value
             left_pixel = imgL[this_ptsL[1]][this_ptsL[0]]
             # Get the right pixel value
@@ -470,6 +464,7 @@ def get_point_colours(imgL, ptsL, imgR, ptsR, pts4D, fmap, verbose=False):
 
             # Average these, and divide by 255 to give a float colour values
             pixel4D = ((int(left_pixel[0]) + int(right_pixel[0]))/2)/255
+            # Rearrange to RGB format
             pixel4D = np.array(pixel4D).repeat(3)
 
             # Add this to the colours list
@@ -481,104 +476,38 @@ def get_point_colours(imgL, ptsL, imgR, ptsR, pts4D, fmap, verbose=False):
     # Return the colours
     return colours4D
 
-def plot_point_cloud(pts4D, colours4D=[], pts4D_indices=[], verbose=False):
+def plot_point_cloud(pts4D, colours4D=[], verbose=False):
     """Create a point cloud of all 3D points found so far
 
     :param pts4D: a list of 4D (homogeneous) points to be plotted
-    :param pts4D_indices: a list of indices, separating the pts4D
-        into one set for each pair of images processed. If this
-        is the empty list, all points are plotted with the same
-        colour.
+    :param colours4D: a list of colour extracted from the image for each
+        point in pts4D. Must be the same length as pts4D.
     :param verbose: as in pipeline()
     """
     # convert from homogeneous coordinates to 3D
     pts3D = pts4D[:, :3]/np.repeat(pts4D[:, 3], 3).reshape(-1, 3)
 
-    # print(len(pts3D))
-    # pts3D = np.array([point for point in pts3D if point[0] < 20 and point[1] < 20 and point[2] < 20])
-    # print("Post processing:", len(pts3D))
-
-    # print(pts3D.shape)
-    # # Test the resulting Z coordinates
-    # test_x = sorted(pts3D[:][0])
-    # test_y = sorted(pts3D[:][1])
-    # test_z = sorted(pts3D[:][2])
-
-    # print("Lowest X:", test_x[0])
-    # print("Second highest X:", test_x[-2])
-    # print("Highest X:", test_x[-1])
-    # print("Lowest Y:", test_y[0])
-    # print("Second highest Y:", test_y[-2])
-    # print("Highest Y:", test_y[-1])
-    # print("Lowest Z:", test_z[0])
-    # print("Second highest Z:", test_z[-2])
-    # print("Highest z:", test_z[-1])
-
-    colours = [
-        [1, 0, 0],
-        [0, 1, 0],
-        [0, 0, 1],
-        [1, 1, 0],
-        [1, 0, 1],
-        [0, 1, 1],
-        [1, 0.5, 0],
-        [1, 0, 0.5],
-        [0.5, 1, 0],
-        [0.5, 0, 1],
-        [0, 1, 0.5],
-        [0, 0.5, 1],
-        [1, 0.5, 0.5],
-        [0.5, 1, 0.5],
-        [0.5, 0.5, 1],
-        [0, 0, 0]
-    ]
-    # cv2.projectPoints()
-    # pcd.colors = Vector3dVector(np_colors)
-
     # Plot with open3d
     plot_list = []
-    # If no indices or colours are given, paint all point red
-    if len(pts4D_indices) == 0 and len(colours4D) == 0:
+    if len(colours4D) == 0:
         # Plot all points red
         pcd = open3d.PointCloud()
         pcd.points = open3d.Vector3dVector(pts3D)
         pcd.paint_uniform_color([1, 0, 0])
         plot_list.append(pcd)
     # If colours are given, use these
-    elif len(colours4D) > 0:
+    else:
         # Plot each point with its given colour
         pcd = open3d.PointCloud()
         pcd.points = open3d.Vector3dVector(pts3D)
         pcd.colors = open3d.Vector3dVector(colours4D)
         plot_list.append(pcd)
-    # If no colours are given but indices are given, paint each set (between each index)
-    # a different colour from the colour list above
-    else:
-        # Plot each set of points (for each image pair) a different colour
-        for index in range(1, len(pts4D_indices)):
-            start = pts4D_indices[index - 1]
-            end = pts4D_indices[index]
-            pcd = open3d.PointCloud()
-            pcd.points = open3d.Vector3dVector(pts3D[start:end])
-            pcd.paint_uniform_color(colours[(index-1) % len(colours)])
-            plot_list.append(pcd)
     
     # Print the number of 3D points plotted
     print("Plotted {} 3D points".format(len(pts3D)))
     
     # Draw the point cloud
     open3d.draw_geometries(plot_list)
-
-#TODO
-def apply_bundle_adjustment():
-    """Apply bundle adjustment
-
-    This improves the resultant 3D points through bundle adjustment.
-
-    :param pts3D: the 3D points to be adjusted
-    :param verbose: as in pipeline()
-    """
-    pass
 
 def downsize_img(img, wmax=1600, hmax=900):
     """ Downsize the given image
