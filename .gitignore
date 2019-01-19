@@ -1,10 +1,8 @@
-# Dataset
-*.png
 .vscode/*
-Structure_from_Motion/cycleimages.py
 temp.*
-report*
-!report.pdf
+
+# Dataset
+Dataset/*.png
 
 ### Pre-generated ###
 
