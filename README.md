@@ -1,5 +1,5 @@
 # SSAIV_ACV
-Code for Structure from Motion assignment for Advanced Computer Vision as part of Software, Systems and Applications IV module, taken in my fourth year of Computer Science at Durham University.
+Code for the Structure from Motion coursework for the `Advanced Computer Vision` submodule as part of the `Software, Systems and Applications IV` module, taken in my fourth year of Computer Science (MEng) at Durham University.
 
 ## Requirements
 
